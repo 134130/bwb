@@ -1,0 +1,16 @@
+pre-commit:
+  jobs:
+    - name: tidy
+      glob: "*.go"
+      run: go mod tidy
+      stage_fixed: true
+    - name: golangci-lint
+      glob: "*.go"
+      run: golangci-lint fmt {staged_files}
+      stage_fixed: true
+    - name: test
+      glob: "*.go"
+      run: mise test
+    - name: integration
+      script: integration.sh
+      runner: sh

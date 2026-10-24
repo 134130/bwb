@@ -1,0 +1,23 @@
+[tools]
+go = "1.27.2"
+golangci-lint = "2.15.0"
+lefthook = "2.2.2"
+
+[tasks.init]
+run = "lefthook install"
+
+[tasks.test]
+run = "go test ./..."
+
+[tasks.integration]
+description = "Check fixtures and verify two fresh Vaultwarden snapshot restores"
+run = [
+  ".dev/venv/bin/python -m unittest discover -s dev -p 'test_*.py'",
+  ".dev/venv/bin/python -m unittest discover -s dev/integration -p 'test_*.py'",
+  ".dev/venv/bin/python dev/integration/run.py",
+  ".dev/venv/bin/python dev/integration/run.py",
+]
+
+[tasks."integration:rebuild"]
+description = "Regenerate the synthetic SQL snapshot after changing fixture coverage"
+run = ".dev/venv/bin/python dev/integration/run.py --rebuild"

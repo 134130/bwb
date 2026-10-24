@@ -1,0 +1,14 @@
+# Proposed bwb configuration; not executable configuration yet.
+version = 1
+default_profile = "local"
+
+[profiles.local]
+server = "http://localhost:8222"
+email = "bwb-demo@example.invalid"
+# Zero means retain unlocked vault keys until explicit lock or daemon exit.
+lock_timeout = "0s"
+
+[profiles.work]
+server = "https://vault.bitwarden.com"
+email = "developer@example.invalid"
+lock_timeout = "15m"

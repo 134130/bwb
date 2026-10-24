@@ -1,0 +1,315 @@
+{
+  "encrypted": false,
+  "folders": [
+    {
+      "id": "10000000-0000-4000-8000-000000000001",
+      "name": "Development"
+    },
+    {
+      "id": "10000000-0000-4000-8000-000000000002",
+      "name": "Personal"
+    }
+  ],
+  "items": [
+    {
+      "id": "20000000-0000-4000-8000-000000000001",
+      "organizationId": null,
+      "folderId": "10000000-0000-4000-8000-000000000001",
+      "type": 1,
+      "reprompt": 0,
+      "name": "GitHub (demo)",
+      "notes": null,
+      "favorite": true,
+      "fields": [],
+      "collectionIds": [],
+      "login": {
+        "username": "developer@example.invalid",
+        "password": "DEMO-only-password-1!",
+        "totp": null,
+        "uris": [
+          {
+            "match": null,
+            "uri": "https://github.example.invalid"
+          }
+        ]
+      }
+    },
+    {
+      "id": "20000000-0000-4000-8000-000000000002",
+      "organizationId": null,
+      "folderId": "10000000-0000-4000-8000-000000000001",
+      "type": 1,
+      "reprompt": 0,
+      "name": "Database",
+      "notes": null,
+      "favorite": false,
+      "fields": [
+        {
+          "name": "host",
+          "value": "localhost",
+          "type": 0
+        },
+        {
+          "name": "api_token",
+          "value": "DEMO-token-2",
+          "type": 1
+        }
+      ],
+      "collectionIds": [],
+      "login": {
+        "username": "demo",
+        "password": "DEMO-db-2",
+        "totp": null,
+        "uris": []
+      }
+    },
+    {
+      "id": "20000000-0000-4000-8000-000000000003",
+      "organizationId": null,
+      "folderId": "10000000-0000-4000-8000-000000000002",
+      "type": 1,
+      "reprompt": 0,
+      "name": "Database",
+      "notes": null,
+      "favorite": false,
+      "fields": [
+        {
+          "name": "host",
+          "value": "localhost",
+          "type": 0
+        },
+        {
+          "name": "api_token",
+          "value": "DEMO-token-3",
+          "type": 1
+        }
+      ],
+      "collectionIds": [],
+      "login": {
+        "username": "demo",
+        "password": "DEMO-db-3",
+        "totp": null,
+        "uris": []
+      }
+    },
+    {
+      "id": "20000000-0000-4000-8000-000000000004",
+      "organizationId": null,
+      "folderId": "10000000-0000-4000-8000-000000000001",
+      "type": 1,
+      "reprompt": 0,
+      "name": "개발 서버 🔐",
+      "notes": "첫 번째 줄\n두 번째 줄",
+      "favorite": false,
+      "fields": [],
+      "collectionIds": [],
+      "login": {
+        "username": "한글 사용자",
+        "password": "DEMO-한글-비밀번호",
+        "totp": null,
+        "uris": [
+          {
+            "match": null,
+            "uri": "https://dev.example.invalid"
+          }
+        ]
+      }
+    },
+    {
+      "id": "20000000-0000-4000-8000-000000000005",
+      "organizationId": null,
+      "folderId": null,
+      "type": 1,
+      "reprompt": 0,
+      "name": "Empty login",
+      "notes": null,
+      "favorite": false,
+      "fields": [],
+      "collectionIds": [],
+      "login": {
+        "username": "",
+        "password": "",
+        "totp": null,
+        "uris": []
+      }
+    },
+    {
+      "id": "20000000-0000-4000-8000-000000000006",
+      "organizationId": null,
+      "folderId": "10000000-0000-4000-8000-000000000001",
+      "type": 2,
+      "reprompt": 0,
+      "name": "Recovery codes (demo)",
+      "notes": "DEMO-0001\nDEMO-0002\n",
+      "favorite": false,
+      "fields": [],
+      "collectionIds": [],
+      "secureNote": {
+        "type": 0
+      }
+    },
+    {
+      "id": "20000000-0000-4000-8000-000000000007",
+      "organizationId": null,
+      "folderId": "10000000-0000-4000-8000-000000000001",
+      "type": 3,
+      "reprompt": 0,
+      "name": "Payment card (demo)",
+      "notes": null,
+      "favorite": false,
+      "fields": [],
+      "collectionIds": [],
+      "card": {
+        "cardholderName": "Demo User",
+        "brand": "Visa",
+        "number": "4111111111111111",
+        "expMonth": "12",
+        "expYear": "2030",
+        "code": "123"
+      }
+    },
+    {
+      "id": "20000000-0000-4000-8000-000000000008",
+      "organizationId": null,
+      "folderId": "10000000-0000-4000-8000-000000000001",
+      "type": 4,
+      "reprompt": 0,
+      "name": "Identity (demo)",
+      "notes": null,
+      "favorite": false,
+      "fields": [],
+      "collectionIds": [],
+      "identity": {
+        "title": null,
+        "firstName": "Demo",
+        "middleName": null,
+        "lastName": "User",
+        "address1": "123 Example Street",
+        "address2": null,
+        "address3": null,
+        "city": "Example",
+        "state": null,
+        "postalCode": "00000",
+        "country": "KR",
+        "company": "Example",
+        "email": "demo@example.invalid",
+        "phone": null,
+        "ssn": null,
+        "username": "demo",
+        "passportNumber": null,
+        "licenseNumber": null
+      }
+    },
+    {
+      "id": "20000000-0000-4000-8000-000000000009",
+      "organizationId": null,
+      "folderId": "10000000-0000-4000-8000-000000000001",
+      "type": 1,
+      "reprompt": 0,
+      "name": "OTP (public test seed)",
+      "notes": null,
+      "favorite": false,
+      "fields": [],
+      "collectionIds": [],
+      "login": {
+        "username": "otp@example.invalid",
+        "password": "DEMO-otp-password",
+        "totp": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+        "uris": []
+      }
+    },
+    {
+      "id": "20000000-0000-4000-8000-000000000010",
+      "organizationId": null,
+      "folderId": null,
+      "type": 5,
+      "reprompt": 0,
+      "name": "SSH key (public test key)",
+      "notes": null,
+      "favorite": false,
+      "fields": [],
+      "collectionIds": [],
+      "sshKey": {
+        "privateKey": "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZWQyNTUx\nOQAAACBjcnC5Cw060CAxu9KZYYzMsNYar24hcEq5cGr5T2hKCgAAAIhVCpoEVQqaBAAAAAtzc2gt\nZWQyNTUxOQAAACBjcnC5Cw060CAxu9KZYYzMsNYar24hcEq5cGr5T2hKCgAAAEDKVacTIKj4wVIW\nueK/U5qVOHjfdwAGzBkWASYqjCIANGNycLkLDTrQIDG70plhjMyw1hqvbiFwSrlwavlPaEoKAAAA\nAAECAwQF\n-----END OPENSSH PRIVATE KEY-----\n",
+        "publicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGNycLkLDTrQIDG70plhjMyw1hqvbiFwSrlwavlPaEoK",
+        "keyFingerprint": "SHA256:FEbSwxINCJZR4L/F+GAKlM8ZK0F3akV78sGj3Wh58XQ"
+      }
+    },
+    {
+      "id": "20000000-0000-4000-8000-000000000011",
+      "organizationId": null,
+      "folderId": null,
+      "type": 6,
+      "reprompt": 0,
+      "name": "Bank account (demo)",
+      "notes": null,
+      "favorite": false,
+      "fields": [],
+      "collectionIds": [],
+      "bankAccount": {
+        "bankName": "Example Bank",
+        "nameOnAccount": "Demo User",
+        "accountType": "Checking",
+        "accountNumber": "DEMO-1234",
+        "routingNumber": "DEMO-5678",
+        "branchNumber": "001",
+        "pin": "0000",
+        "swiftCode": "DEMOXXXX",
+        "iban": "DEMO-IBAN",
+        "bankContactPhone": "+1-202-555-0100"
+      }
+    },
+    {
+      "id": "20000000-0000-4000-8000-000000000012",
+      "organizationId": null,
+      "folderId": null,
+      "type": 7,
+      "reprompt": 0,
+      "name": "Driver license (demo)",
+      "notes": null,
+      "favorite": false,
+      "fields": [],
+      "collectionIds": [],
+      "driversLicense": {
+        "firstName": "Demo",
+        "middleName": "",
+        "lastName": "User",
+        "dateOfBirth": "1990-01-01",
+        "licenseNumber": "DEMO-LICENSE",
+        "issuingCountry": "KR",
+        "issuingState": "Seoul",
+        "issueDate": "2020-01-01",
+        "expirationDate": "2030-01-01",
+        "issuingAuthority": "Example",
+        "licenseClass": "B"
+      }
+    },
+    {
+      "id": "20000000-0000-4000-8000-000000000013",
+      "organizationId": null,
+      "folderId": null,
+      "type": 8,
+      "reprompt": 0,
+      "name": "Passport (demo)",
+      "notes": null,
+      "favorite": false,
+      "fields": [],
+      "collectionIds": [],
+      "passport": {
+        "surname": "User",
+        "givenName": "Demo",
+        "dateOfBirth": "1990-01-01",
+        "sex": "X",
+        "birthPlace": "Example",
+        "nationality": "KR",
+        "issuingCountry": "KR",
+        "passportNumber": "DEMO-PASSPORT",
+        "passportType": "P",
+        "nationalIdentificationNumber": "DEMO-ID",
+        "issuingAuthority": "Example",
+        "issueDate": "2020-01-01",
+        "expirationDate": "2030-01-01"
+      }
+    }
+  ]
+}
