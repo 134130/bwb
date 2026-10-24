@@ -256,7 +256,10 @@ def main():
                 db.executescript((SNAPSHOT / 'vaultwarden.sql').read_text())
                 require(db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok', 'corrupt snapshot')
             with Server(directory) as server:
-                verify(server, manifest)
+                subprocess.run(
+                    ['go', 'test', '-tags=integration', '-count=1', '-v',
+                     './internal/bitwarden', './internal/cli'],
+                    cwd=ROOT, env={**os.environ, 'BWB_INTEGRATION_URL': server.url}, check=True)
 
 
 if __name__ == '__main__':

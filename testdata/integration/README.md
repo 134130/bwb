@@ -27,3 +27,5 @@
 `Bitwarden-Client-Version: 2026.10.0`을 보내며, 헤더가 없으면 이 서버는 SSH key를 sync에서 제외한다.
 
 이 matrix는 타입별 기본 round-trip coverage다. 모든 optional field·키 계층·인증 방식이 검증되었다는 의미는 아니다. 후속 사례는 기존 fixture에 추가하고 snapshot을 재생성한다. 테스트 crypto helper의 round-trip은 독립적인 공식 client 상호운용성 검증을 대신하지 않는다.
+
+일반 restore 검증은 Go 제품 코드(`internal/bitwarden`)와 Cobra 명령(`internal/cli`)의 integration test가 수행한다. Python crypto는 dump 생성 및 독립 golden 값의 출처이며, Go 구현이 Python 결과와 일치하는지를 비교한다.

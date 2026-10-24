@@ -1,6 +1,6 @@
 # bwb 설계
 
-상태: 재설계안. 실행 가능한 bwb 및 integration test는 아직 구현되지 않았다.
+상태: 목표 설계. 첫 구현은 Cobra read + Go API/PBKDF2 복호화와 실제 snapshot integration까지다. 아래 daemon/profile/TUI 계약은 아직 미구현이며 현재 사용법은 README를 따른다.
 
 ## 1. 방향과 첫 범위
 
@@ -168,7 +168,7 @@ CLI / TUI ─ typed local RPC ─ vault service
 - DB/config/log/argv에 plaintext 비밀번호·복호화 키·token·vault 값 없음. refresh token은 OS credential store에만 존재. logout 뒤 cache/credential 접근 불가.
 - 중복 이름, 빈 값, Unicode, 여러 줄 notes, hidden field, card/identity 기본 마스킹, RPC 크기 초과.
 
-현재 문서·Compose·fixture 외에 실제 서버 snapshot 복원과 API login/refresh/sync/8종 복호화 비교 runner가 존재한다. 이는 테스트 도구이며 위 bwb production 구현과 CLI/TUI 검증은 아직 완료되지 않았다. 테스트는 전용 서버·계정에만 데이터를 쓰고 실제 vault를 purge하지 않는다.
+현재 Go 제품 API의 login/refresh/sync/8종 복호화와 Cobra read를 snapshot 서버에서 검증한다. Python은 snapshot 생성·복원을 담당한다. daemon·저장 수명·TUI·Argon2id·2FA 및 공식 Bitwarden 서버 검증은 남아 있다. 현재 Session은 단일 호출 소유 일반 Go buffer이며 장기 daemon 보관 전 locked memory 구현이 필요하다. 테스트는 전용 서버·계정에만 데이터를 쓰고 실제 vault를 purge하지 않는다.
 
 ## 9. 참고한 인터페이스와 근거
 
@@ -187,3 +187,5 @@ rbw 검토 revision: `77464d414a9e41165d5b15f049bee1f0c0f2a982`.
 rbw가 모든 refresh 실패를 자동 login으로 회복하거나 모든 secret을 메모리에만 둔다고 가정하지 않는다.
 
 BW_SESSION은 [공식 CLI의 로컬 secure storage 키](https://github.com/bitwarden/clients/blob/main/apps/cli/src/platform/services/node-env-secure-storage.service.ts)이며 API token이 아니다. bwb에서는 이 환경변수를 인증 계약으로 사용하지 않는다.
+
+의존성: 현재 사용 중인 Cobra/UUID만 go.mod에 유지한다. daemon 구현 단계에서 기존에 선택한 `github.com/134130/go-daemonkit v0.0.0-20261024090218-d756ef3418d7`을 다시 추가한다. 미사용 의존성을 보존하기 위한 빈 import는 만들지 않는다.

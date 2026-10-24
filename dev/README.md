@@ -4,7 +4,7 @@
 
 ## 실행
 
-Docker와 Python 3.11+가 필요하다. 저장소 루트에서:
+Docker, Python 3.11+, mise.toml에 고정된 Go가 필요하다. 저장소 루트에서:
 
 ```sh
 python3 -m venv .dev/venv
@@ -15,24 +15,27 @@ mise run integration
 
 `mise run init`은 Git hook을 설치한다. integration task는 항상 `.dev/venv/bin/python`을 사용한다. 새 checkout마다 위 준비를 한 번 수행한다.
 
-runner는 SHA-256 검사 → SQLite 복원·무결성 검사 → digest로 고정된 Vaultwarden 실행 → 실제 API 검증 → 전용 컨테이너·임시 데이터 정리를 수행한다. 계정 등록이나 seed는 일반 테스트 실행에서 하지 않는다.
+runner는 SHA-256 검사 → SQLite 복원·무결성 검사 → digest로 고정된 Vaultwarden 실행 → Go 제품 API·Cobra integration 검증 → 전용 컨테이너·임시 데이터 정리를 수행한다. 계정 등록이나 seed는 일반 테스트 실행에서 하지 않는다.
 
 매 실행마다 임의의 `bwb-integration-*` 이름과 loopback 임시 포트를 사용한다. 기존 `dev/compose.yaml`의 개발 volume이나 사용자 bw 설정에는 접근하지 않는다. 동시에 여러 실행이 가능하다. 강제 kill/호스트 중단 시 임시 컨테이너가 남을 수 있으며 해당 실행의 컨테이너만 정리한다.
 
 ## 현재 검증 범위
 
-- 실제 prelogin, 잘못된 비밀번호 거부, 로그인, refresh token 교환, sync.
+- Go 제품 코드의 실제 prelogin, 잘못된 비밀번호 거부, 로그인, 명시적 refresh와 401 후 자동 refresh, sync.
 - protected user key 복호화 후 8종·13개 항목의 필드를 평문 기대값과 비교.
 - 서버 UUID, folder 관계, enum/boolean/null/빈 값/Unicode/여러 줄 값 유지.
 - fixture/dump checksum 일치, SQL 무결성·foreign key 검사.
-- 테스트 도구의 암호문 변조·잘못된 키 거부, 기대 필드 누락/값 변경 감지.
+- Go 제품 코드의 암호문 변조·잘못된 키·padding 오류 거부, 독립 Python KDF/cipher vector 대조, 기대 필드 누락/값 변경 감지.
+- Cobra read의 정확한 비밀번호/빈 값/여러 줄 출력, 입력 제한, API redirect 차단·응답 크기·KDF 비용 상한.
 
-현재 runner는 Python 테스트 도구다. bwb production client, daemon, CLI/TUI의 검증 완료를 의미하지 않는다. 테스트의 crypto helper도 production에 재사용하지 않는다. bwb 구현 단계에서 같은 dump/manifest를 사용해 실제 제품 명령의 결과를 대조한다. Argon2id, 2FA, 조직 vault, item별 키, 첨부파일과 오프라인/lock 수명은 아직 검증하지 않는다.
+Python runner는 복원된 서버의 URL을 테스트 자식 프로세스에 전달하고 `go test -tags=integration -count=1`을 실행한다. integration 태그 없이 `go test ./...`를 실행하면 Docker 없는 단위 검사만 실행한다. integration 태그가 있는데 서버 URL이 없으면 skip하지 않고 실패한다.
+
+Python crypto helper는 snapshot 재생성/재생성 결과 검사에만 남겨둔다. 일반 integration은 Go 코드로 검증한다. daemon/TUI·keychain·잠금 메모리·Argon2id·2FA·조직/item별 키·첨부파일·오프라인 수명은 아직 미구현/미검증이다. 현재 read는 호출마다 로그인하므로 daemon의 warm 조회 성능을 의미하지 않는다.
 
 ## 데이터 / 타입 추가
 
 1. `testdata/bitwarden.json`에 합성 기대값과 고유 fixture ID를 추가/수정한다. 실계정 dump나 실제 비밀은 사용하지 않는다.
-2. 새 cipher type이면 `dev/integration/run.py`의 `TYPES`와 fixture 구조 검사를 갱신한다. 새로운 필드가 암호문인지 enum인지 공식 스키마를 확인한다. 현재 문자열 필드를 암호화하는 규칙에 맞지 않는 타입은 해당 payload 변환을 명시적으로 추가한다.
+2. 새 cipher type이면 `dev/integration/run.py`의 `TYPES`, `internal/bitwarden/vault.go`의 payload/암호화 필드 목록, fixture 구조 검사를 함께 갱신한다. 새로운 필드가 암호문인지 enum인지 공식 스키마를 확인한다. 현재 문자열 필드를 암호화하는 규칙에 맞지 않는 타입은 해당 payload 변환을 명시적으로 추가한다.
 3. 전용 임시 서버에서 API로 계정·암호문 데이터를 생성해 snapshot을 갱신한다:
 
    ```sh
