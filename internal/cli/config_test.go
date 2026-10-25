@@ -87,3 +87,14 @@ func TestExplicitProfileCommandsIgnoreMalformedConfig(t *testing.T) {
 		}
 	}
 }
+
+func TestTUIRejectsPipedInputBeforeStartingDaemon(t *testing.T) {
+	isolateConfig(t)
+	root := NewRoot()
+	root.SetIn(strings.NewReader(""))
+	root.SetOut(&bytes.Buffer{})
+	root.SetArgs([]string{"tui"})
+	if err := root.Execute(); err == nil || !strings.Contains(err.Error(), "terminal input and output") {
+		t.Fatal(err)
+	}
+}

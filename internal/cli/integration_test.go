@@ -327,6 +327,22 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 			t.Fatalf("TTY %s: %v: %s", scenario, err, output)
 		}
 	}
+	tuiTerminal := func(scenario string, args ...string) {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		if len(args) == 0 {
+			args = []string{"tui"}
+		}
+		script := exec.CommandContext(ctx, "../../.dev/venv/bin/python", append([]string{"../../dev/integration/tui.py", binary, scenario}, args...)...)
+		script.Env = append(os.Environ(), "XDG_STATE_HOME="+state, "BWB_INSTANCE="+instance, "BWB_TEST_PASSWORD="+manifest.Password)
+		if output, err := script.CombinedOutput(); err != nil {
+			t.Fatalf("TUI %s: %v: %s", scenario, err, output)
+		}
+	}
+	must("", "", "lock")
+	tuiTerminal("cancel")
+	tuiTerminal("explorer")
 	must("", "", "lock")
 	terminal("no_prompt", "", "--non-interactive", "item", "list")
 	terminal("no_prompt", "", "--non-interactive", "read", id, "login/password")
@@ -388,13 +404,13 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	}
 	must("", "config valid\n", "--config", configPath, "config", "validate")
 	must(manifest.Password+"\n", "", "--config", configPath, "login", "--password-stdin")
-	must(manifest.Password+"\n", "", "--config", configPath, "--profile", "steady", "login", "--password-stdin")
 	must("", "STATE\tready\nCONFIG\t"+configPath+"\n", "daemon", "status")
 	verbose, err := run("", "--profile", "timed", "status", "--verbose")
 	if err != nil || !strings.Contains(verbose, "SERVER\t"+endpoint.URL+"\n") || !strings.Contains(verbose, "EMAIL\t"+manifest.Email+"\n") || !strings.Contains(verbose, "LOCK_TIMEOUT\t1s\n") || strings.Contains(verbose, "LOCK_AT\t-\n") {
 		t.Fatal("applied status", verbose, err)
 	}
 	must("", verbose, "--profile", "timed", "status", "--verbose")
+	tuiTerminal("login", "--config", configPath, "--profile", "steady", "tui")
 
 	waitLocked := func() {
 		t.Helper()

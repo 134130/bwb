@@ -85,7 +85,7 @@ func NewRoot() *cobra.Command {
 				return err
 			}
 			defer client.Close()
-			execution := executor{client: client, prompt: interactivePrompt(cmd, nonInteractive)}
+			execution := executor{Client: client, Prompt: interactivePrompt(cmd, nonInteractive)}
 			result, err := execution.Read(cmd.Context(), vaultapi.ReadRequest{Profile: profile, ID: args[0], Field: args[1]})
 			if err != nil {
 				return err
@@ -100,7 +100,7 @@ func NewRoot() *cobra.Command {
 				return err
 			}
 			defer client.Close()
-			execution := executor{client: client, prompt: interactivePrompt(cmd, nonInteractive)}
+			execution := executor{Client: client, Prompt: interactivePrompt(cmd, nonInteractive)}
 			_, err = execution.Sync(cmd.Context(), vaultapi.ProfileRequest{Profile: profile})
 			return err
 		}}
@@ -195,7 +195,7 @@ func NewRoot() *cobra.Command {
 		return prepareConfig(cmd, configPath, &profile, root.PersistentFlags().Changed("profile"))
 	}
 	configuration, profiles := configCommands()
-	root.AddCommand(configuration, profiles)
+	root.AddCommand(configuration, profiles, tuiCommand(&profile, &nonInteractive))
 	root.AddCommand(login, unlock, logout, read, sync, lock, status, control)
 	return root
 }

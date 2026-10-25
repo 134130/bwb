@@ -37,7 +37,7 @@ func listCommand(kind string, profile *string, nonInteractive *bool) *cobra.Comm
 				return err
 			}
 			defer client.Close()
-			execution := executor{client: client, prompt: interactivePrompt(cmd, *nonInteractive)}
+			execution := executor{Client: client, Prompt: interactivePrompt(cmd, *nonInteractive)}
 			entries, err := execution.List(cmd.Context(), req)
 			if err != nil {
 				return err

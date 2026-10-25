@@ -212,3 +212,11 @@ BW_SESSION은 [공식 CLI의 로컬 secure storage 키](https://github.com/bitwa
 의존성: Cobra/UUID, 터미널 상태 제어용 `golang.org/x/term`, `github.com/134130/go-daemonkit v0.0.0-20261024090218-d756ef3418d7`, `github.com/awnumar/memguard v0.23.0`. memguard는 직접 OS별 메모리 보호 코드를 만들지 않고 locked memory와 명시적 파기를 사용하기 위한 선택이다. daemonkit Storage와 Secrets를 vault 영속 저장에 사용하며 별도 DB·keychain 구현은 만들지 않는다.
 
 현재 config 적용 계약: TOML은 원하는 설정, SQLite/keychain은 인증·캐시 상태를 소유한다. CLI는 기본 profile 선택과 config/profile 검사에 파일을 읽는다. Daemon은 시작 시 선택한 파일의 profile identity/timeout을 적용하고 `daemon reload`에서 같은 파일 전체를 검증하여 교체한다. 일반 조회는 설정을 적용하지 않는다. Reload 실패 시 기존 정책 유지, 로그인된 profile identity 변경/삭제는 먼저 logout 필요. Logout은 TOML 정의를 삭제하지 않는다. 정책은 DB에 중복 저장하지 않으며 이전 개발 버전의 policy 필드는 무시한다. 설정 교체는 profile 작업과 배타적으로 진행하고, 검증/취소 확인 후에는 caller 취소와 무관하게 메모리 교체를 완료한다. Lock과 idle 만료는 reload 대기 중에도 진행 작업을 취소할 수 있다. 재적용은 마지막 활동 시각을 바꾸지 않는다. Timer generation과 admission deadline 검사로 오래된 타이머와 지연된 만료를 처리한다. 파일 watcher 및 config/profile 편집 명령은 구현하지 않는다.
+
+## TUI 구현 경계
+
+`internal/tui`는 Bubble Tea v2 기반 Explorer/Profiles와 인증 dialog를 담당한다. `Root`만 terminal size를 저장한다. 자식 계약은 `Update(tea.Msg, Size) tea.Cmd` / `View(Size) string`이며 부모의 순수 layout 함수가 content 크기를 계산한다. 레이아웃 변경 시 `LayoutMsg`로 scroll/input 상태를 먼저 동기화한다. View는 상태를 변경하지 않는다. 화면별 layout만 사용하며 범용 layout framework는 없다.
+
+`internal/vaultclient`는 CLI/TUI가 공유하는 인증 예약·watch·한 번 재시도·페이지 수집을 소유한다. TUI의 RPC 결과는 UI epoch에 묶어 profile 전환·잠금·선택 변경 이후의 응답을 버린다. 비밀번호는 in-TUI 입력과 context 취소를 연결하며 기존 daemon의 단일 인증 소유자 규칙을 따른다. TUI는 CLI처럼 직접 서버에 접근하지 않는다.
+
+추가 RPC: `vault.describe`(field label/path만), `vault.profiles`(설정 및 기존 저장 키에서 발견한 이름), `vault.activity`(명시적 사용자 활동). `vault.list`의 background 요청은 idle을 연장하지 않는다. 필드 metadata 조회는 값 복호화를 하지 않으며 기존 reprompt/조직 제한을 보존한다.

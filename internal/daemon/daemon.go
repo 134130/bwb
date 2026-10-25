@@ -57,6 +57,15 @@ func Run(ctx context.Context, configFlag string) error {
 	})); err != nil {
 		return err
 	}
+	if err := app.Handle(vaultapi.Describe, rpcHandler(service.Describe)); err != nil {
+		return err
+	}
+	if err := app.Handle(vaultapi.Profiles, rpcHandler(service.Profiles)); err != nil {
+		return err
+	}
+	if err := app.Handle(vaultapi.Activity, rpcHandler(service.Activity)); err != nil {
+		return err
+	}
 	if err := app.Handle(vaultapi.Reload, rpcHandler(func(ctx context.Context, _ vault.Empty) (vault.Empty, error) {
 		file, err := config.Load(path, true)
 		if err != nil {

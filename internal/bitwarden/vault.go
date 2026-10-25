@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -354,6 +355,22 @@ func (v *Vault) Read(id, path string) (string, error) {
 		}
 		if kind != payloadNames[item.Type] {
 			return "", ErrNotFound
+		}
+		if kind == "login" && strings.HasPrefix(fieldName, "uris/") {
+			index, err := strconv.Atoi(strings.TrimPrefix(fieldName, "uris/"))
+			uris, ok := item.Data["uris"].([]any)
+			if err != nil || index < 0 || !ok || index >= len(uris) {
+				return "", ErrNotFound
+			}
+			uri, ok := uris[index].(map[string]any)
+			if !ok {
+				return "", ErrNotFound
+			}
+			value, ok := uri["uri"].(string)
+			if !ok {
+				return "", ErrNotFound
+			}
+			return value, nil
 		}
 		// Do not expose unrecognized encrypted/metadata fields as if they were plaintext.
 		for _, known := range encryptedFields[item.Type] {

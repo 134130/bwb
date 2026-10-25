@@ -17,6 +17,10 @@ type UnlockRequest = vault.UnlockRequest
 type ReadRequest = vault.ReadRequest
 type Empty = vault.Empty
 type ReadResponse = vault.ReadResponse
+type DescribeRequest = vault.DescribeRequest
+type DescribeResponse = vault.DescribeResponse
+type ProfilesResponse = vault.ProfilesResponse
+
 type StatusResponse = vault.StatusResponse
 
 type DaemonStatusResponse struct {
@@ -43,6 +47,9 @@ type AuthWatchResponse = vault.AuthWatchResponse
 const AuthTimeout = vault.AuthTimeout
 
 var (
+	Describe     = daemon.NewMethod[DescribeRequest, DescribeResponse]("vault.describe")
+	Profiles     = daemon.NewMethod[Empty, ProfilesResponse]("vault.profiles")
+	Activity     = daemon.NewMethod[ProfileRequest, Empty]("vault.activity")
 	DaemonStatus = daemon.NewMethod[Empty, DaemonStatusResponse]("daemon.status")
 	Reload       = daemon.NewMethod[Empty, Empty]("vault.reload")
 	List         = daemon.NewMethod[ListRequest, ListResponse]("vault.list")

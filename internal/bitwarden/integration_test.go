@@ -112,6 +112,22 @@ func TestSnapshotIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	for _, item := range vault.Items {
+		fields, err := session.Describe(ctx, snapshot, item.ID)
+		if err != nil {
+			t.Fatal("describe", item.Type, err)
+		}
+		for _, field := range fields {
+			expected, err := vault.Read(item.ID, field.Path)
+			if err != nil {
+				continue
+			} // Ambiguous custom names remain explicit read errors.
+			actual, err := session.Read(snapshot, item.ID, field.Path)
+			if err != nil || actual != expected {
+				t.Fatal("described field read", item.Type, field.Path, err)
+			}
+		}
+	}
 	encoded, err := json.Marshal(session.Cache(snapshot))
 	if err != nil {
 		t.Fatal(err)

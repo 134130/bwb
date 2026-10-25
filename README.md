@@ -115,3 +115,24 @@ bwb --profile personal status --verbose
 `daemon status`는 Ready인 daemon의 선택된 config 절대 경로를 표시한다(기본 파일이 없더라도 선택된 경로 표시). `status --verbose`는 적용 중인 서버·계정·lock_timeout과 UTC 잠금 예정 시각 `LOCK_AT`을 표시한다. 잠겼거나 자동 잠금이 꺼졌으면 예정 시각은 `-`다. Config 없는 legacy profile은 저장된 계정과 timeout 0s를 표시한다. 두 명령은 daemon을 자동 시작하거나 활동 시간을 연장하지 않는다. 기본 `status`의 한 줄 출력은 유지한다. TOML이 잘못된 경우에도 `daemon status`와 명시적 `--profile NAME status --verbose`로 현재 적용 상태를 확인할 수 있다.
 
 릴리스는 `mise run release`로 실행한다. 게시 없는 빌드 검증은 `mise run release -- --snapshot --skip=publish`다. GitHub Actions도 `v*` 태그 push에서 같은 task를 호출한다. 지원 대상과 환경 요구사항은 [개발 문서](dev/README.md#release와-hook-관리)를 참고한다.
+
+## TUI Explorer
+
+```sh
+bwb --profile personal tui
+```
+
+터미널 입력·출력이 모두 필요하다. Explorer는 개인 folder, 조직 collection, 항목을 같은 tree에 표시한다. `/`로 fuzzy 검색하면 tree를 유지하면서 매치 없는 가지를 숨긴다. 디렉터리가 맞으면 하위 전체를, 항목이 맞으면 상위 경로와 해당 항목을 표시한다. 여러 collection에 속한 항목은 각 경로에 표시한다. `/`로 구분된 컨테이너 이름은 화면상 계층으로 표현하며 권한 상속을 의미하지 않는다. 같은 이름의 컨테이너도 ID를 구분한다.
+
+- `↑↓`/`j,k`: 이동. `←→`/`h,l`: 접기·펼치기. `s`: 디렉터리 우선 이름 정렬 방향 전환.
+- `/`: 검색 입력. `Enter` 또는 `Esc`: 검색어를 유지하고 tree로 복귀. Tree에서 `Esc`: 검색 해제 및 원래 위치 복원.
+- `Tab`: tree/상세 pane. 좁은 화면에서는 상세가 별도 화면으로 전환된다.
+- 항목에서 `Enter`: 상세로 이동. 필드에서 `Enter`: 값 표시/숨김. `PgUp/PgDown`: 긴 값 스크롤.
+- `Ctrl+P`: Profiles. `Enter`/`u`: profile 선택·인증. `l`: 선택 profile 잠금. `x`: 확인 후 logout. `r`: daemon이 선택한 TOML 전체 reload.
+- `Ctrl+L`: 현재 profile 잠금. `?`: 도움말. `q`: 종료(daemon은 기존 timeout 정책 유지). 비밀번호 창은 `Esc`로 취소한다.
+
+항목 선택은 필드 이름만 가져오고 모든 값은 기본 마스킹한다. 비밀은 필드를 명시적으로 열 때만 Read RPC로 가져온다. 항목·필드 이동, 상세 pane 이탈, profile 전환 시 표시값을 제거한다. 500ms 상태 조회로 잠금을 감지하면 tree·검색어·상세·비밀을 화면과 UI 상태에서 제거하고 다시 인증한 뒤 opaque ID로 위치를 복원한다. 연결 오류는 데이터 제거 후 TUI 재시작을 안내한다. 이미 표시된 터미널 내용과 Go 문자열의 물리적 소거는 보장하지 않는다.
+
+검색·탐색 같은 실제 사용자 조작은 최대 초당 한 번 Activity RPC로 idle 시간을 갱신한다. 백그라운드 목록·필드 이름 조회와 상태 polling은 시간을 연장하지 않는다. 비밀 필드 조회는 CLI와 같은 기존 활동 정책을 따른다. `login/uris/0` 등 URI도 명시적 필드 경로로 읽을 수 있다.
+
+Profiles는 TOML에 정의된 profile과 SQLite에 저장된 로그인 profile을 함께 보여준다. 파일 값과 적용값을 비교하고 파일 오류를 표시하며, 파일 오류 중에도 잠금·logout이 가능하다. 편집·클립보드 복사·자동 sync는 아직 제공하지 않는다.

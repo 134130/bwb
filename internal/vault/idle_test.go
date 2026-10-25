@@ -317,3 +317,35 @@ func TestStatusReportsAppliedPolicyWithoutRenewingDeadline(t *testing.T) {
 		t.Fatal(status, err)
 	}
 }
+
+func TestBackgroundListDoesNotRenewIdleButActivityDoes(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := &Service{}
+		defer s.Shutdown(context.Background())
+		p := idleProfile(t, s, "default", "10s")
+		p.catalogID = "generation"
+		time.Sleep(4 * time.Second)
+		if _, err := s.List(t.Context(), ListRequest{Profile: "default", Kind: "item", Background: true}); err != nil {
+			t.Fatal(err)
+		}
+		s.mu.Lock()
+		deadline := p.idleDeadline
+		s.mu.Unlock()
+		if remaining := time.Until(deadline); remaining != 6*time.Second {
+			t.Fatal("background renewed deadline", remaining)
+		}
+		if _, err := s.Activity(t.Context(), ProfileRequest{Profile: "default"}); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(6 * time.Second)
+		synctest.Wait()
+		if !inspectIdle(s, p).session {
+			t.Fatal("activity did not renew")
+		}
+		time.Sleep(4 * time.Second)
+		synctest.Wait()
+		if inspectIdle(s, p).session {
+			t.Fatal("background kept session alive")
+		}
+	})
+}

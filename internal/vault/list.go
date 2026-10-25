@@ -19,6 +19,7 @@ type ListEntry = bitwarden.ListEntry
 type NamedID = bitwarden.NamedID
 
 type ListRequest struct {
+	Background     bool     `json:"background,omitempty"`
 	Profile        string   `json:"profile"`
 	Kind           string   `json:"kind"`
 	Search         string   `json:"search,omitempty"`
@@ -120,8 +121,10 @@ func (s *Service) List(ctx context.Context, req ListRequest) (ListResponse, erro
 	if err := ctx.Err(); err != nil {
 		return ListResponse{}, err
 	}
-	if err := s.touch(ctx, p); err != nil {
-		return ListResponse{}, err
+	if !req.Background {
+		if err := s.touch(ctx, p); err != nil {
+			return ListResponse{}, err
+		}
 	}
 	return response, nil
 }

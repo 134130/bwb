@@ -1,4 +1,4 @@
-package cli
+package vaultclient
 
 import (
 	"context"
@@ -37,7 +37,7 @@ func TestExecuteRetriesOnceAndReturnsOnlyFinalResult(t *testing.T) {
 }
 
 func TestExecutorDoesNotAuthenticateOrdinaryOrNoninteractiveErrors(t *testing.T) {
-	e := executor{prompt: func(context.Context, authPrompt) ([]byte, error) { t.Fatal("unexpected prompt"); return nil, nil }}
+	e := Executor{Prompt: func(context.Context, AuthPrompt) ([]byte, error) { t.Fatal("unexpected prompt"); return nil, nil }}
 	for _, err := range []error{
 		errors.New("network error"),
 		&kit.RPCError{Code: -32000, Message: "login required"},
@@ -49,7 +49,7 @@ func TestExecutorDoesNotAuthenticateOrdinaryOrNoninteractiveErrors(t *testing.T)
 			t.Fatal(got)
 		}
 	}
-	e.prompt = nil
+	e.Prompt = nil
 	err := &kit.RPCError{Code: vaultapi.UnlockRequiredCode, Data: []byte(`{"profile":"default"}`)}
 	if e.authenticate(context.Background(), "default", err) != err {
 		t.Fatal("noninteractive error changed")

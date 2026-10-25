@@ -80,7 +80,8 @@ func (s *Service) BeginAuth(ctx context.Context, req AuthRequest) (AuthResponse,
 			done()
 			return AuthResponse{}, errors.New("logout incomplete; retry logout")
 		}
-		if saved.Cache == nil {
+		policy, configured := s.policies[req.Profile]
+		if saved.Cache == nil && (!configured || req.Action != "login") {
 			err := s.authRequired(waitCtx, p, req.Profile, "login")
 			done()
 			return AuthResponse{}, err
@@ -122,7 +123,10 @@ func (s *Service) BeginAuth(ctx context.Context, req AuthRequest) (AuthResponse,
 				s.finishAuth(p)
 			}
 		})
-		result := AuthResponse{ID: attempt.id, Server: saved.Cache.Server, Email: saved.Cache.Email}
+		result := AuthResponse{ID: attempt.id, Server: policy.Server, Email: policy.Email}
+		if saved.Cache != nil {
+			result.Server, result.Email = saved.Cache.Server, saved.Cache.Email
+		}
 		s.mu.Unlock()
 		done()
 		return result, nil
