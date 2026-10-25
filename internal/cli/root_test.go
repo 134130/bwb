@@ -28,6 +28,7 @@ func TestHelpAndInputErrors(t *testing.T) {
 		var out bytes.Buffer
 		root.SetOut(&out)
 		root.SetErr(&out)
+		root.SetIn(strings.NewReader(""))
 		root.SetArgs(args)
 		if err := root.Execute(); err == nil {
 			t.Fatal("invalid command succeeded")

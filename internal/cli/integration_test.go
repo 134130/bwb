@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/google/uuid"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -56,9 +57,19 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	var requests atomic.Int64
 	var offline atomic.Bool
 	var pauseSync atomic.Bool
+	var rejectRefresh atomic.Bool
 	syncStarted := make(chan struct{}, 1)
 	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
+		if rejectRefresh.Load() && r.URL.Path == "/identity/connect/token" {
+			body, _ := io.ReadAll(r.Body)
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			form, _ := url.ParseQuery(string(body))
+			if form.Get("grant_type") == "refresh_token" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+		}
 		if pauseSync.Load() && r.URL.Path == "/api/sync" {
 			syncStarted <- struct{}{}
 			<-r.Context().Done()
@@ -195,6 +206,46 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	if requests.Load() < before+2 {
 		t.Fatal("restart did not refresh using persisted token")
 	}
+	// Exercise the actual controlling terminal; stdout remains a pipe.
+	terminal := func(scenario, want string, args ...string) {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+		defer cancel()
+		script := exec.CommandContext(ctx, "python3", append([]string{"../../dev/integration/terminal.py", scenario, binary}, args...)...)
+		script.Env = append(os.Environ(), "XDG_STATE_HOME="+state, "BWB_INSTANCE="+instance, "BWB_TEST_PASSWORD="+manifest.Password, "BWB_TEST_EXPECT="+want)
+		if output, err := script.CombinedOutput(); err != nil {
+			t.Fatalf("TTY %s: %v: %s", scenario, err, output)
+		}
+	}
+	must("", "", "lock")
+	terminal("no_prompt", "", "--non-interactive", "read", id, "login/password")
+	for _, scenario := range []string{"wrong", "long", "cancel", "signal", "lock", "cancel_waiters"} {
+		terminal(scenario, "", "read", id, "login/password")
+		must("", "locked\n", "status")
+	}
+	offline.Store(true)
+	before = requests.Load()
+	terminal("concurrent", "DEMO-only-password-1!", "read", id, "login/password")
+	if requests.Load() != before {
+		t.Fatal("automatic unlock contacted server")
+	}
+	terminal("no_prompt", "", "sync")
+	offline.Store(false)
+	// Offline unlock has no access token, so sync must refresh, then recover a rejected refresh via login.
+	must("", "", "lock")
+	must(manifest.Password+"\n", "", "unlock", "--password-stdin")
+	rejectRefresh.Store(true)
+	if _, err := run("", "sync"); err == nil {
+		t.Fatal("rejected refresh did not require login")
+	}
+	before = requests.Load()
+	must("", "DEMO-only-password-1!", "read", id, "login/password")
+	if requests.Load() != before {
+		t.Fatal("cached read checked expired authentication")
+	}
+	terminal("success", "", "sync")
+	rejectRefresh.Store(false)
+	must("", "unlocked\n", "status")
 	// A second restart proves the latest credential remains usable.
 	must("", "", "daemon", "stop")
 	must(manifest.Password+"\n", "", "unlock", "--password-stdin")

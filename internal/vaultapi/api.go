@@ -1,43 +1,47 @@
 // Package vaultapi defines the shared CLI/daemon wire contract.
 package vaultapi
 
-import daemon "github.com/134130/go-daemonkit"
+import (
+	"github.com/134130/bwb/internal/vault"
+	daemon "github.com/134130/go-daemonkit"
+)
 
-type ProfileRequest struct {
+type ProfileRequest = vault.ProfileRequest
+type LoginRequest = vault.LoginRequest
+type UnlockRequest = vault.UnlockRequest
+type ReadRequest = vault.ReadRequest
+type Empty = vault.Empty
+type ReadResponse = vault.ReadResponse
+type StatusResponse = vault.StatusResponse
+
+const (
+	UnlockRequiredCode = -32010
+	LoginRequiredCode  = -32011
+	StateChangedCode   = -32012
+)
+
+type AuthDetails struct {
 	Profile string `json:"profile"`
-}
-type LoginRequest struct {
-	Profile  string `json:"profile"`
-	Server   string `json:"server"`
-	Email    string `json:"email"`
-	Password []byte `json:"password"`
-}
-type UnlockRequest struct {
-	Profile  string `json:"profile"`
-	Password []byte `json:"password"`
+	Epoch   uint64 `json:"epoch"`
+	Version uint64 `json:"version"`
 }
 
-type ReadRequest struct {
-	Profile string `json:"profile"`
-	ID      string `json:"id"`
-	Field   string `json:"field"`
-}
-type Empty struct{}
-type ReadResponse struct {
-	Value string `json:"value"`
-}
-type StatusResponse struct {
-	State string `json:"state"`
-}
+type AuthRequest = vault.AuthRequest
+type AuthResponse = vault.AuthResponse
+type AuthEndRequest = vault.AuthEndRequest
+type AuthWatchResponse = vault.AuthWatchResponse
 
-const LockedCode = -32010
+const AuthTimeout = vault.AuthTimeout
 
 var (
-	Unlock = daemon.NewMethod[UnlockRequest, Empty]("vault.unlock")
-	Logout = daemon.NewMethod[ProfileRequest, Empty]("vault.logout")
-	Login  = daemon.NewMethod[LoginRequest, Empty]("vault.login")
-	Read   = daemon.NewMethod[ReadRequest, ReadResponse]("vault.read")
-	Sync   = daemon.NewMethod[ProfileRequest, Empty]("vault.sync")
-	Lock   = daemon.NewMethod[ProfileRequest, Empty]("vault.lock")
-	Status = daemon.NewMethod[ProfileRequest, StatusResponse]("vault.status")
+	WatchAuth = daemon.NewMethod[AuthEndRequest, AuthWatchResponse]("vault.watchAuth")
+	BeginAuth = daemon.NewMethod[AuthRequest, AuthResponse]("vault.beginAuth")
+	EndAuth   = daemon.NewMethod[AuthEndRequest, Empty]("vault.endAuth")
+	Unlock    = daemon.NewMethod[UnlockRequest, Empty]("vault.unlock")
+	Logout    = daemon.NewMethod[ProfileRequest, Empty]("vault.logout")
+	Login     = daemon.NewMethod[LoginRequest, Empty]("vault.login")
+	Read      = daemon.NewMethod[ReadRequest, ReadResponse]("vault.read")
+	Sync      = daemon.NewMethod[ProfileRequest, Empty]("vault.sync")
+	Lock      = daemon.NewMethod[ProfileRequest, Empty]("vault.lock")
+	Status    = daemon.NewMethod[ProfileRequest, StatusResponse]("vault.status")
 )

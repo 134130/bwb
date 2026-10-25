@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/134130/bwb/internal/bitwarden"
-	"github.com/134130/bwb/internal/vaultapi"
 	daemon "github.com/134130/go-daemonkit"
 	"github.com/134130/go-daemonkit/secrets"
 )
@@ -128,7 +127,7 @@ func TestCredentialJournalAndLogoutFailure(t *testing.T) {
 		t.Fatal("journal did not collect abandoned credential")
 	}
 	f.deleteErr = secrets.ErrPermission
-	if _, err := recovered.Logout(ctx, vaultapi.ProfileRequest{Profile: "default"}); !errors.Is(err, secrets.ErrPermission) {
+	if _, err := recovered.Logout(ctx, ProfileRequest{Profile: "default"}); !errors.Is(err, secrets.ErrPermission) {
 		t.Fatal(err)
 	}
 	saved, err = recovered.load(ctx, "default")
@@ -138,11 +137,11 @@ func TestCredentialJournalAndLogoutFailure(t *testing.T) {
 	if !saved.Deleting || saved.Cache != nil || len(saved.Garbage) != 2 {
 		t.Fatal("failed logout did not revoke cached unlock")
 	}
-	if _, err := recovered.Unlock(ctx, vaultapi.UnlockRequest{Profile: "default", Password: []byte("irrelevant")}); err == nil {
+	if _, err := recovered.Unlock(ctx, UnlockRequest{Profile: "default", Password: []byte("irrelevant")}); err == nil {
 		t.Fatal("incomplete logout allowed unlock")
 	}
 	f.deleteErr = nil
-	if _, err := recovered.Logout(ctx, vaultapi.ProfileRequest{Profile: "default"}); err != nil {
+	if _, err := recovered.Logout(ctx, ProfileRequest{Profile: "default"}); err != nil {
 		t.Fatal(err)
 	}
 	if len(f.values) != 0 {
@@ -210,7 +209,7 @@ func TestCanceledCommitLeavesRecoverableCredentialIntent(t *testing.T) {
 		t.Fatal("canceled commit lost credential cleanup intent")
 	}
 	f.afterSet = nil
-	if _, err := s.Logout(context.Background(), vaultapi.ProfileRequest{Profile: "default"}); err != nil {
+	if _, err := s.Logout(context.Background(), ProfileRequest{Profile: "default"}); err != nil {
 		t.Fatal(err)
 	}
 	if len(f.values) != 0 {
@@ -240,7 +239,8 @@ func TestStaleMemorySessionCannotOverwriteCommittedCredential(t *testing.T) {
 	if err := s.saveLogin(ctx, r, cache, []byte("new")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Sync(ctx, vaultapi.ProfileRequest{Profile: "default"}); err == nil || !strings.Contains(err.Error(), "saved login changed") {
+	var auth *AuthRequired
+	if _, err := s.Sync(ctx, ProfileRequest{Profile: "default"}); !errors.As(err, &auth) || auth.Action != "unlock" {
 		t.Fatal(err)
 	}
 	token, err := s.token(ctx, r)

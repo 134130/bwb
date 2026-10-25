@@ -43,25 +43,34 @@ func Run(ctx context.Context) error {
 	if err := app.Register(service); err != nil {
 		return err
 	}
-	if err := app.Handle(vaultapi.Unlock, service.Unlock); err != nil {
+	if err := app.Handle(vaultapi.WatchAuth, rpcHandler(service.WatchAuth)); err != nil {
 		return err
 	}
-	if err := app.Handle(vaultapi.Logout, service.Logout); err != nil {
+	if err := app.Handle(vaultapi.BeginAuth, rpcHandler(service.BeginAuth)); err != nil {
 		return err
 	}
-	if err := app.Handle(vaultapi.Login, service.Login); err != nil {
+	if err := app.Handle(vaultapi.EndAuth, rpcHandler(service.EndAuth)); err != nil {
 		return err
 	}
-	if err := app.Handle(vaultapi.Read, service.Read); err != nil {
+	if err := app.Handle(vaultapi.Unlock, rpcHandler(service.Unlock)); err != nil {
 		return err
 	}
-	if err := app.Handle(vaultapi.Sync, service.Sync); err != nil {
+	if err := app.Handle(vaultapi.Logout, rpcHandler(service.Logout)); err != nil {
 		return err
 	}
-	if err := app.Handle(vaultapi.Lock, service.Lock); err != nil {
+	if err := app.Handle(vaultapi.Login, rpcHandler(service.Login)); err != nil {
 		return err
 	}
-	if err := app.Handle(vaultapi.Status, service.Status); err != nil {
+	if err := app.Handle(vaultapi.Read, rpcHandler(service.Read)); err != nil {
+		return err
+	}
+	if err := app.Handle(vaultapi.Sync, rpcHandler(service.Sync)); err != nil {
+		return err
+	}
+	if err := app.Handle(vaultapi.Lock, rpcHandler(service.Lock)); err != nil {
+		return err
+	}
+	if err := app.Handle(vaultapi.Status, rpcHandler(service.Status)); err != nil {
 		return err
 	}
 	return app.Run(ctx)

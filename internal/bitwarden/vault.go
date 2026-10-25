@@ -118,7 +118,7 @@ func (s *Session) validateSnapshot(ctx context.Context, response syncResponse) (
 		return nil, nil, errors.New("vault account does not match session")
 	}
 	if response.Profile.Key != s.protectedKey {
-		return nil, nil, errors.New("vault key changed; login again")
+		return nil, nil, ErrKeyChanged
 	}
 	if response.Folders == nil || response.Ciphers == nil {
 		return nil, nil, errors.New("incomplete sync response")

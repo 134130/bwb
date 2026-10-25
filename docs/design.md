@@ -55,12 +55,12 @@ CLI / TUI → daemon에 작업 요청
 | unlock | cache가 있으면 아니오 | 예 |
 | lock / logout | 아니오 | 아니오 |
 
-로그인은 protected key와 KDF metadata를 확보한다. 기존 cache의 키 세대와 일치하지 않으면 새 metadata만 덮어쓰지 않고 후속 sync를 요구한다. 최초 조회 흐름은 한 인증 작업 안에서 받은 비밀번호로 login·sync·unlock을 마친 뒤 비밀번호를 파기해 중복 prompt를 피한다. 명시적 login은 기존 vault를 자동 unlock하지 않는다.
+로그인은 protected key와 KDF metadata를 확보한다. 기존 cache의 키 세대와 일치하지 않으면 새 metadata만 덮어쓰지 않고 후속 sync를 요구한다. 최초 조회 흐름은 한 인증 작업 안에서 받은 비밀번호로 login·sync·unlock을 마친 뒤 비밀번호를 파기해 중복 prompt를 피한다. 현재 명시적 login은 sync와 메모리 unlock까지 수행한다.
 
 hook은 임의 shell script가 아니라 **CLI/TUI의 내장 인증 조정 흐름**이다. daemon은 `login_required`, `unlock_required`, 2FA challenge를 반환하고 UI가 입력을 받는다. daemon이 직접 터미널 prompt를 띄우지 않는다.
 
 - profile당 인증 흐름 하나. daemon이 작업 ID와 소유 연결을 정하고 나머지 요청은 결과를 기다린다. 입력은 해당 작업·연결·profile·generation에 묶는다.
-- prompt 소유 연결이 끊기거나 취소되면 challenge를 폐기한다. 다른 대기자가 자동으로 prompt를 연쇄 생성하지 않고 취소 결과를 받는다. 대기자 하나의 취소는 다른 작업을 취소하지 않는다.
+- prompt 소유 연결은 별도 대기 RPC로 감시하며 끊기거나 취소되면 challenge를 폐기한다. 예약 응답 후 감시 시작 전 이탈은 2분 만료로 정리한다. 다른 대기자가 자동으로 prompt를 연쇄 생성하지 않고 취소 결과를 받는다. 대기자 하나의 취소는 다른 작업을 취소하지 않는다.
 - 인증 완료 후 원래 읽기 작업을 한 번 재개한다. 재인증이 또 필요하면 오류로 끝내며 무한 loop하지 않는다. 잘못된 비밀번호/2FA/사용자 취소도 원래 작업으로 실패를 전달한다.
 - 비TTY 또는 `--non-interactive`에서는 prompt하지 않고 인증 필요 오류를 반환한다. stdout이 pipe여도 controlling terminal이 있고 명시적으로 non-interactive가 아니면 그 terminal에서 입력한다. 비밀 입력은 echo하지 않는다.
 - 자동 refresh는 profile당 하나만 수행한다. 401에는 refresh 후 한 번 재시도하고, invalid/revoked refresh는 credential store에서 제거한 뒤 login을 요청한다. 네트워크 실패는 로그인 만료로 오인하지 않는다.
@@ -168,7 +168,7 @@ CLI / TUI ─ typed local RPC ─ vault service
 - DB/config/log/argv에 plaintext 비밀번호·복호화 키·token·vault 값 없음. refresh token은 OS credential store에만 존재. logout 뒤 cache/credential 접근 불가.
 - 중복 이름, 빈 값, Unicode, 여러 줄 notes, hidden field, card/identity 기본 마스킹, RPC 크기 초과.
 
-현재 Go API의 login/refresh/sync/8종 복호화와 Cobra → daemon RPC를 snapshot 서버에서 검증한다. profile별 키·토큰은 memguard locked memory, snapshot은 암호문으로 메모리에 유지한다. read는 HTTP 없이 동작하며 lock/shutdown은 진행 중 작업을 취소하고 세션을 파기한다. 임시 crypto/HTTP/RPC 평문 복사본까지 완전히 zeroize하지는 않는다. `main.go`는 root, 패키지는 `cli`, `vaultapi`, `daemon`, `vault`, `bitwarden`으로 나눈다. keychain refresh token과 SQLite 암호화 cache 저장, HTTP 없는 unlock, 로컬 logout을 구현했다. `lock`은 메모리만 파기하고 재시작 후 비밀번호로 unlock한다. SQLite/keychain 간 작업은 credential 정리 목록으로 복구하며, logout 실패 시 표시를 저장하고 unlock을 막는다. 자동 인증 hook·TUI·Argon2id·2FA는 후속이다. 테스트는 전용 서버·계정만 사용한다.
+현재 Go API의 login/refresh/sync/8종 복호화와 Cobra → daemon RPC를 snapshot 서버에서 검증한다. profile별 키·토큰은 memguard locked memory, snapshot은 암호문으로 메모리에 유지한다. read는 HTTP 없이 동작하며 lock/shutdown은 진행 중 작업을 취소하고 세션을 파기한다. 임시 crypto/HTTP/RPC 평문 복사본까지 완전히 zeroize하지는 않는다. `main.go`는 root, 패키지는 `cli`, `vaultapi`, `daemon`, `vault`, `bitwarden`으로 나눈다. keychain refresh token과 SQLite 암호화 cache 저장, HTTP 없는 unlock, 로컬 logout을 구현했다. `lock`은 메모리만 파기하고 재시작 후 비밀번호로 unlock한다. SQLite/keychain 간 작업은 credential 정리 목록으로 복구하며, logout 실패 시 표시를 저장하고 unlock을 막는다. CLI 공통 실행부의 인증 후 원래 read/sync 1회 재시도까지 구현했다. 서비스의 AuthRequired/ErrStateChanged는 daemon에서 RPC 코드로 바꾸며 일반 장애는 그대로 전달한다. 자동 인증 예약은 연결 감시·취소·lock 및 2분 만료로 정리하고, 대기자는 prompt를 중복 생성하지 않는다. TUI·Argon2id·2FA는 후속이다. 테스트는 전용 서버·계정만 사용한다.
 
 ## 9. 참고한 인터페이스와 근거
 
@@ -188,4 +188,4 @@ rbw가 모든 refresh 실패를 자동 login으로 회복하거나 모든 secret
 
 BW_SESSION은 [공식 CLI의 로컬 secure storage 키](https://github.com/bitwarden/clients/blob/main/apps/cli/src/platform/services/node-env-secure-storage.service.ts)이며 API token이 아니다. bwb에서는 이 환경변수를 인증 계약으로 사용하지 않는다.
 
-의존성: Cobra/UUID, `github.com/134130/go-daemonkit v0.0.0-20261024090218-d756ef3418d7`, `github.com/awnumar/memguard v0.23.0`. memguard는 직접 OS별 메모리 보호 코드를 만들지 않고 locked memory와 명시적 파기를 사용하기 위한 선택이다. daemonkit Storage와 Secrets를 vault 영속 저장에 사용하며 별도 DB·keychain 구현은 만들지 않는다.
+의존성: Cobra/UUID, 터미널 상태 제어용 `golang.org/x/term`, `github.com/134130/go-daemonkit v0.0.0-20261024090218-d756ef3418d7`, `github.com/awnumar/memguard v0.23.0`. memguard는 직접 OS별 메모리 보호 코드를 만들지 않고 locked memory와 명시적 파기를 사용하기 위한 선택이다. daemonkit Storage와 Secrets를 vault 영속 저장에 사용하며 별도 DB·keychain 구현은 만들지 않는다.

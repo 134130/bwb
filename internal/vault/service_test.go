@@ -5,8 +5,6 @@ import (
 	"errors"
 	"testing"
 	"testing/synctest"
-
-	"github.com/134130/bwb/internal/vaultapi"
 )
 
 func TestLockCancelsActiveAndRejectsQueuedOperation(t *testing.T) {
@@ -27,7 +25,7 @@ func TestLockCancelsActiveAndRejectsQueuedOperation(t *testing.T) {
 		synctest.Wait()
 		locked := make(chan error, 1)
 		go func() {
-			_, err := s.Lock(context.Background(), vaultapi.ProfileRequest{Profile: "default"})
+			_, err := s.Lock(context.Background(), ProfileRequest{Profile: "default"})
 			locked <- err
 		}()
 		synctest.Wait()
@@ -41,7 +39,7 @@ func TestLockCancelsActiveAndRejectsQueuedOperation(t *testing.T) {
 		}
 		finish()
 		synctest.Wait()
-		if err := <-queued; !errors.Is(err, errLocked) {
+		if err := <-queued; !errors.Is(err, ErrStateChanged) {
 			t.Fatal("queued operation survived lock", err)
 		}
 		if err := <-locked; err != nil {
@@ -70,7 +68,7 @@ func TestShutdownCancelsAllProfilesAndPreventsReopen(t *testing.T) {
 		if err := <-stopped; err != nil {
 			t.Fatal(err)
 		}
-		if _, _, _, err := s.begin(context.Background(), "a", true); !errors.Is(err, errLocked) {
+		if _, _, _, err := s.begin(context.Background(), "a", true); !errors.Is(err, ErrStateChanged) {
 			t.Fatal("shutdown allowed login", err)
 		}
 	})
@@ -93,17 +91,17 @@ func TestQueuedCancellationAndProfileValidation(t *testing.T) {
 	})
 	s := &Service{}
 	for _, name := range []string{"", "..", "../other", "a/b"} {
-		if _, err := s.Status(context.Background(), vaultapi.ProfileRequest{Profile: name}); err == nil {
+		if _, err := s.Status(context.Background(), ProfileRequest{Profile: name}); err == nil {
 			t.Fatal("invalid profile accepted")
 		}
 	}
-	if _, err := s.Read(context.Background(), vaultapi.ReadRequest{Profile: "default"}); !errors.Is(err, errLocked) {
-		t.Fatal(err)
-	}
-	if _, err := s.Sync(context.Background(), vaultapi.ProfileRequest{Profile: "default"}); !errors.Is(err, errLocked) {
-		t.Fatal(err)
-	}
-	if len(s.profiles) != 0 {
-		t.Fatal("read created state")
+	for _, err := range []error{
+		func() error { _, err := s.Read(context.Background(), ReadRequest{Profile: "default"}); return err }(),
+		func() error { _, err := s.Sync(context.Background(), ProfileRequest{Profile: "default"}); return err }(),
+	} {
+		var auth *AuthRequired
+		if err == nil || errors.As(err, &auth) {
+			t.Fatal("storage failure became authentication request", err)
+		}
 	}
 }

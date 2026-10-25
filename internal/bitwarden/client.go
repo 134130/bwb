@@ -18,6 +18,8 @@ import (
 	"github.com/awnumar/memguard"
 )
 
+var ErrKeyChanged = errors.New("vault key changed; login again")
+
 var ErrAuthentication = errors.New("login required or credentials rejected")
 
 // Client talks to Password Manager endpoints, never the public organization API.

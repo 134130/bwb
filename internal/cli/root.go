@@ -14,23 +14,23 @@ import (
 	kit "github.com/134130/go-daemonkit"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 func NewRoot() *cobra.Command {
 	root := &cobra.Command{Use: "bwb", Short: "Read Bitwarden vault fields through a local daemon", SilenceUsage: true, SilenceErrors: true}
 	var profile string
+	var nonInteractive bool
+	root.PersistentFlags().BoolVar(&nonInteractive, "non-interactive", false, "Never prompt for authentication")
 	root.PersistentFlags().StringVar(&profile, "profile", "default", "Vault profile")
 	var server, email string
 	var passwordStdin bool
 	login := &cobra.Command{Use: "login", Short: "Log in and cache an encrypted snapshot", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if !passwordStdin {
-				return errors.New("--password-stdin is required; interactive login is not implemented yet")
-			}
 			if _, err := bitwarden.NewClient(server, email, uuid.NewString()); err != nil {
 				return err
 			}
-			password, err := passwordInput(cmd)
+			password, err := commandPassword(cmd, passwordStdin, nonInteractive, authPrompt{Action: "login", Profile: profile, Server: server, Email: email})
 			if err != nil {
 				return err
 			}
@@ -50,10 +50,7 @@ func NewRoot() *cobra.Command {
 	_ = login.MarkFlagRequired("email")
 	var unlockStdin bool
 	unlock := &cobra.Command{Use: "unlock", Short: "Unlock a saved vault without network access", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		if !unlockStdin {
-			return errors.New("--password-stdin is required; interactive unlock is not implemented yet")
-		}
-		password, err := passwordInput(cmd)
+		password, err := commandPassword(cmd, unlockStdin, nonInteractive, authPrompt{Action: "unlock", Profile: profile})
 		if err != nil {
 			return err
 		}
@@ -86,7 +83,8 @@ func NewRoot() *cobra.Command {
 				return err
 			}
 			defer client.Close()
-			result, err := client.Invoke(cmd.Context(), vaultapi.Read, vaultapi.ReadRequest{Profile: profile, ID: args[0], Field: args[1]})
+			execution := executor{client: client, prompt: interactivePrompt(cmd, nonInteractive)}
+			result, err := execution.Read(cmd.Context(), vaultapi.ReadRequest{Profile: profile, ID: args[0], Field: args[1]})
 			if err != nil {
 				return err
 			}
@@ -100,7 +98,8 @@ func NewRoot() *cobra.Command {
 				return err
 			}
 			defer client.Close()
-			_, err = client.Invoke(cmd.Context(), vaultapi.Sync, vaultapi.ProfileRequest{Profile: profile})
+			execution := executor{client: client, prompt: interactivePrompt(cmd, nonInteractive)}
+			_, err = execution.Sync(cmd.Context(), vaultapi.ProfileRequest{Profile: profile})
 			return err
 		}}
 	lock := &cobra.Command{Use: "lock", Short: "Destroy in-memory keys while retaining the saved login", Args: cobra.NoArgs,
@@ -174,6 +173,28 @@ func NewRoot() *cobra.Command {
 	}})
 	root.AddCommand(login, unlock, logout, read, sync, lock, status, control)
 	return root
+}
+
+func interactivePrompt(cmd *cobra.Command, disabled bool) passwordPrompt {
+	if disabled {
+		return nil
+	}
+	input, ok := cmd.InOrStdin().(*os.File)
+	if !ok || !term.IsTerminal(int(input.Fd())) {
+		return nil
+	}
+	return terminalPassword
+}
+
+func commandPassword(cmd *cobra.Command, stdin, disabled bool, request authPrompt) ([]byte, error) {
+	if stdin {
+		return passwordInput(cmd)
+	}
+	prompt := interactivePrompt(cmd, disabled)
+	if prompt == nil {
+		return nil, errors.New("--password-stdin is required in non-interactive mode")
+	}
+	return prompt(cmd.Context(), request)
 }
 
 func passwordInput(cmd *cobra.Command) ([]byte, error) {
