@@ -52,6 +52,11 @@ func Run(ctx context.Context, configFlag string) error {
 	if err := app.Register(service); err != nil {
 		return err
 	}
+	if err := app.Handle(vaultapi.DaemonStatus, rpcHandler(func(context.Context, vault.Empty) (vaultapi.DaemonStatusResponse, error) {
+		return vaultapi.DaemonStatusResponse{ConfigPath: path}, nil
+	})); err != nil {
+		return err
+	}
 	if err := app.Handle(vaultapi.Reload, rpcHandler(func(ctx context.Context, _ vault.Empty) (vault.Empty, error) {
 		file, err := config.Load(path, true)
 		if err != nil {

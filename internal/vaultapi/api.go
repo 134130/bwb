@@ -19,6 +19,10 @@ type Empty = vault.Empty
 type ReadResponse = vault.ReadResponse
 type StatusResponse = vault.StatusResponse
 
+type DaemonStatusResponse struct {
+	ConfigPath string `json:"configPath"`
+}
+
 const (
 	UnlockRequiredCode = -32010
 	LoginRequiredCode  = -32011
@@ -39,16 +43,17 @@ type AuthWatchResponse = vault.AuthWatchResponse
 const AuthTimeout = vault.AuthTimeout
 
 var (
-	Reload    = daemon.NewMethod[Empty, Empty]("vault.reload")
-	List      = daemon.NewMethod[ListRequest, ListResponse]("vault.list")
-	WatchAuth = daemon.NewMethod[AuthEndRequest, AuthWatchResponse]("vault.watchAuth")
-	BeginAuth = daemon.NewMethod[AuthRequest, AuthResponse]("vault.beginAuth")
-	EndAuth   = daemon.NewMethod[AuthEndRequest, Empty]("vault.endAuth")
-	Unlock    = daemon.NewMethod[UnlockRequest, Empty]("vault.unlock")
-	Logout    = daemon.NewMethod[ProfileRequest, Empty]("vault.logout")
-	Login     = daemon.NewMethod[LoginRequest, Empty]("vault.login")
-	Read      = daemon.NewMethod[ReadRequest, ReadResponse]("vault.read")
-	Sync      = daemon.NewMethod[ProfileRequest, Empty]("vault.sync")
-	Lock      = daemon.NewMethod[ProfileRequest, Empty]("vault.lock")
-	Status    = daemon.NewMethod[ProfileRequest, StatusResponse]("vault.status")
+	DaemonStatus = daemon.NewMethod[Empty, DaemonStatusResponse]("daemon.status")
+	Reload       = daemon.NewMethod[Empty, Empty]("vault.reload")
+	List         = daemon.NewMethod[ListRequest, ListResponse]("vault.list")
+	WatchAuth    = daemon.NewMethod[AuthEndRequest, AuthWatchResponse]("vault.watchAuth")
+	BeginAuth    = daemon.NewMethod[AuthRequest, AuthResponse]("vault.beginAuth")
+	EndAuth      = daemon.NewMethod[AuthEndRequest, Empty]("vault.endAuth")
+	Unlock       = daemon.NewMethod[UnlockRequest, Empty]("vault.unlock")
+	Logout       = daemon.NewMethod[ProfileRequest, Empty]("vault.logout")
+	Login        = daemon.NewMethod[LoginRequest, Empty]("vault.login")
+	Read         = daemon.NewMethod[ReadRequest, ReadResponse]("vault.read")
+	Sync         = daemon.NewMethod[ProfileRequest, Empty]("vault.sync")
+	Lock         = daemon.NewMethod[ProfileRequest, Empty]("vault.lock")
+	Status       = daemon.NewMethod[ProfileRequest, StatusResponse]("vault.status")
 )

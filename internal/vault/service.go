@@ -397,7 +397,18 @@ func (s *Service) Status(ctx context.Context, req ProfileRequest) (StatusRespons
 			state = "unlocked"
 		}
 	}
-	return StatusResponse{State: state}, nil
+	result := StatusResponse{State: state, LockTimeout: "0s"}
+	if policy, ok := s.policies[req.Profile]; ok {
+		result.Server, result.Email, result.LockTimeout = policy.Server, policy.Email, policy.LockTimeout
+	} else if saved.Cache != nil {
+		result.Server, result.Email = saved.Cache.Server, saved.Cache.Email
+	}
+	s.mu.Lock()
+	if !p.idleDeadline.IsZero() {
+		result.LockAt = p.idleDeadline.UTC().Format(time.RFC3339Nano)
+	}
+	s.mu.Unlock()
+	return result, nil
 }
 
 func destroy(p *profile) {

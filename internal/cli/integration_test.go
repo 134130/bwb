@@ -126,6 +126,8 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 		}
 	}()
 	must("", "stopped\n", "status")
+	must("", "stopped\n", "daemon", "status")
+	must("", "stopped\n", "status", "--verbose")
 	entries, err := os.ReadDir(state)
 	if err != nil || len(entries) != 0 {
 		t.Fatal("status created daemon state", err)
@@ -387,6 +389,13 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	must("", "config valid\n", "--config", configPath, "config", "validate")
 	must(manifest.Password+"\n", "", "--config", configPath, "login", "--password-stdin")
 	must(manifest.Password+"\n", "", "--config", configPath, "--profile", "steady", "login", "--password-stdin")
+	must("", "STATE\tready\nCONFIG\t"+configPath+"\n", "daemon", "status")
+	verbose, err := run("", "--profile", "timed", "status", "--verbose")
+	if err != nil || !strings.Contains(verbose, "SERVER\t"+endpoint.URL+"\n") || !strings.Contains(verbose, "EMAIL\t"+manifest.Email+"\n") || !strings.Contains(verbose, "LOCK_TIMEOUT\t1s\n") || strings.Contains(verbose, "LOCK_AT\t-\n") {
+		t.Fatal("applied status", verbose, err)
+	}
+	must("", verbose, "--profile", "timed", "status", "--verbose")
+
 	waitLocked := func() {
 		t.Helper()
 		deadline := time.Now().Add(5 * time.Second)
@@ -439,6 +448,7 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(150 * time.Millisecond)
+	must("", "PROFILE\tsteady\nSTATE\tunlocked\nSERVER\t"+endpoint.URL+"\nEMAIL\t"+manifest.Email+"\nLOCK_TIMEOUT\t0s\nLOCK_AT\t-\n", "--profile", "steady", "status", "--verbose")
 	must("", "unlocked\n", "--profile", "steady", "status")
 	must("", "", "daemon", "reload")
 	must("", "locked\n", "--profile", "steady", "status")
@@ -448,6 +458,8 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	if _, err := run("", "daemon", "reload"); err == nil {
 		t.Fatal("malformed reload accepted")
 	}
+	must("", "STATE\tready\nCONFIG\t"+configPath+"\n", "--config", "does-not-exist.toml", "daemon", "status")
+	must("", "PROFILE\tsteady\nSTATE\tlocked\nSERVER\t"+endpoint.URL+"\nEMAIL\t"+manifest.Email+"\nLOCK_TIMEOUT\t100ms\nLOCK_AT\t-\n", "--config", configPath, "--profile", "steady", "status", "--verbose")
 	must(manifest.Password+"\n", "", "--config", configPath, "--profile", "timed", "unlock", "--password-stdin")
 	waitLocked()
 	must("", "", "--config", configPath, "--profile", "steady", "lock")

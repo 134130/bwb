@@ -104,3 +104,12 @@ Daemon은 시작할 때 설정 경로를 확정하고 server/email/lock_timeout�
 직접 파일을 수정한 뒤 `bwb config validate`, `bwb daemon reload`를 실행한다. Reload는 daemon 시작 시 선택한 파일 전체를 검증하고 성공할 때만 정책을 교체한다. 문법 오류·누락 파일·로그인된 profile의 identity 변경이나 삭제는 기존 정책을 유지한 채 거부한다. Identity 변경/삭제는 먼저 해당 profile을 logout한다. Logout은 인증 상태만 지우며 TOML 정의는 유지한다. Watcher는 없고 일반 조회는 정책을 적용하지 않는다. 정책은 DB에 저장하지 않으며, 이전 개발 버전의 DB policy 필드는 무시한다(인증 캐시는 유지).
 
 `lock_timeout = "0s"`는 자동 잠금을 끈다. 양수면 login/unlock 완료부터 계산하고 성공한 read/list에서 갱신한다. Status·sync·reload·실패한 조회는 연장하지 않는다. Reload로 시간이 줄어 이미 만료됐다면 잠금 처리하고 요청 진입에서도 deadline을 검사한다. 만료 시 진행 작업 취소, 키·목록 index 파기를 수행하며 cache/keychain 로그인은 유지한다. 다음 대화형 read/list는 기존 자동 unlock 후 재개한다. Native keychain 호출은 진행 중 취소할 수 없어 실제 파기 완료가 늦어질 수 있다.
+
+실행 상태 확인:
+
+```sh
+bwb daemon status
+bwb --profile personal status --verbose
+```
+
+`daemon status`는 Ready인 daemon의 선택된 config 절대 경로를 표시한다(기본 파일이 없더라도 선택된 경로 표시). `status --verbose`는 적용 중인 서버·계정·lock_timeout과 UTC 잠금 예정 시각 `LOCK_AT`을 표시한다. 잠겼거나 자동 잠금이 꺼졌으면 예정 시각은 `-`다. Config 없는 legacy profile은 저장된 계정과 timeout 0s를 표시한다. 두 명령은 daemon을 자동 시작하거나 활동 시간을 연장하지 않는다. 기본 `status`의 한 줄 출력은 유지한다. TOML이 잘못된 경우에도 `daemon status`와 명시적 `--profile NAME status --verbose`로 현재 적용 상태를 확인할 수 있다.

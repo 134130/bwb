@@ -26,5 +26,9 @@ type ReadResponse struct {
 	Value string `json:"value"`
 }
 type StatusResponse struct {
-	State string `json:"state"`
+	Server      string `json:"server,omitempty"`
+	Email       string `json:"email,omitempty"`
+	LockTimeout string `json:"lockTimeout"`
+	LockAt      string `json:"lockAt,omitempty"`
+	State       string `json:"state"`
 }

@@ -63,3 +63,5 @@ fixture를 바꾸고 snapshot 재생성을 잊으면 checksum 검사에서 실�
 현재 coverage와 upstream 근거는 [snapshot 설명](../testdata/integration/README.md)에 있다. 테스트 계정 비밀번호와 SSH private key는 의도적으로 공개된 합성 데이터다. 이 snapshot을 공개 서버나 실제 계정으로 사용하지 않는다.
 
 `dev/compose.yaml`은 별도의 수동 개발 서버 구성이다. pre-commit integration runner는 이 장기 volume을 사용하지 않는다.
+
+- 상태 조회 integration은 daemon 설정 경로, reload 전후 실제 timeout, 잘못된 TOML 중 조회, verbose 조회의 잠금 시각 불변과 stopped 조회의 무기동을 검사한다.

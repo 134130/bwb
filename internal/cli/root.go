@@ -125,6 +125,7 @@ func NewRoot() *cobra.Command {
 			_, err = client.Invoke(cmd.Context(), vaultapi.Lock, vaultapi.ProfileRequest{Profile: profile})
 			return err
 		}}
+	var verbose bool
 	status := &cobra.Command{Use: "status", Short: "Show profile state without starting the daemon", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			manager, err := daemon.Manager()
@@ -148,10 +149,15 @@ func NewRoot() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if verbose {
+				return writeStatus(cmd.OutOrStdout(), profile, result)
+			}
 			_, err = fmt.Fprintln(cmd.OutOrStdout(), result.State)
 			return err
 		}}
+	status.Flags().BoolVar(&verbose, "verbose", false, "Show applied identity, lock timeout and deadline")
 	control := &cobra.Command{Use: "daemon", Short: "Manage the local daemon"}
+	control.AddCommand(daemonStatusCommand())
 	control.AddCommand(&cobra.Command{Use: "run", Short: "Run the daemon in the foreground", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error { return daemon.Run(cmd.Context(), configPath) }})
 	control.AddCommand(&cobra.Command{Use: "reload", Short: "Validate and apply the running daemon's config file", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {

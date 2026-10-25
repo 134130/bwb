@@ -277,3 +277,43 @@ func TestReloadDoesNotPreventLockCancellation(t *testing.T) {
 		}
 	})
 }
+
+func TestStatusReportsAppliedPolicyWithoutRenewingDeadline(t *testing.T) {
+	s, _ := persistentService(t)
+	defer s.Shutdown(context.Background())
+	policy := config.Profile{Server: "https://example.invalid", Email: "test@example.invalid", LockTimeout: "15m"}
+	if err := s.ApplyConfig(t.Context(), &config.File{Profiles: map[string]config.Profile{"default": policy}}); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := s.load(t.Context(), "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.saveLogin(t.Context(), saved, &bitwarden.Cache{Version: 1, Server: policy.Server, Email: policy.Email}, []byte("token")); err != nil {
+		t.Fatal(err)
+	}
+	p := idleProfile(t, s, "default", "15m")
+	s.mu.Lock()
+	deadline, activity := p.idleDeadline, p.lastActivity
+	s.mu.Unlock()
+	status, err := s.Status(t.Context(), ProfileRequest{Profile: "default"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.State != "unlocked" || status.Server != policy.Server || status.Email != policy.Email || status.LockTimeout != "15m0s" || status.LockAt != deadline.UTC().Format(time.RFC3339Nano) {
+		t.Fatal(status)
+	}
+	s.mu.Lock()
+	unchanged := p.idleDeadline.Equal(deadline) && p.lastActivity.Equal(activity)
+	s.mu.Unlock()
+	if !unchanged {
+		t.Fatal("status renewed activity")
+	}
+	if _, err := s.Lock(t.Context(), ProfileRequest{Profile: "default"}); err != nil {
+		t.Fatal(err)
+	}
+	status, err = s.Status(t.Context(), ProfileRequest{Profile: "default"})
+	if err != nil || status.State != "locked" || status.LockAt != "" {
+		t.Fatal(status, err)
+	}
+}
