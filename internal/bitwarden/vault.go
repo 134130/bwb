@@ -74,8 +74,9 @@ func validID(value string) bool {
 
 // Snapshot holds only server ciphertext and metadata; reads never contact the server.
 type Snapshot struct {
-	profile Profile
-	items   map[string]json.RawMessage
+	profile  Profile
+	response syncResponse
+	items    map[string]json.RawMessage
 }
 
 func (s *Session) Sync(ctx context.Context) (*Vault, error) {
@@ -92,6 +93,11 @@ func (s *Session) sync(ctx context.Context) (*Snapshot, *Vault, error) {
 	if !s.active() {
 		return nil, nil, ErrAuthentication
 	}
+	if s.access == nil {
+		if err := s.Refresh(ctx); err != nil {
+			return nil, nil, err
+		}
+	}
 	var response syncResponse
 	err := s.client.request(ctx, "GET", s.client.api+"/sync", nil, false, string(s.access.Bytes()), &response)
 	if errors.Is(err, ErrAuthentication) {
@@ -103,6 +109,10 @@ func (s *Session) sync(ctx context.Context) (*Snapshot, *Vault, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	return s.validateSnapshot(ctx, response)
+}
+
+func (s *Session) validateSnapshot(ctx context.Context, response syncResponse) (*Snapshot, *Vault, error) {
 	if !validID(response.Profile.ID) || strings.ToLower(strings.TrimSpace(response.Profile.Email)) != s.client.email ||
 		(s.accountID != "" && s.accountID != response.Profile.ID) {
 		return nil, nil, errors.New("vault account does not match session")
@@ -122,7 +132,7 @@ func (s *Session) sync(ctx context.Context) (*Snapshot, *Vault, error) {
 	for i, item := range vault.Items {
 		items[item.ID] = response.Ciphers[i]
 	}
-	return &Snapshot{profile: response.Profile, items: items}, vault, nil
+	return &Snapshot{profile: response.Profile, response: response, items: items}, vault, nil
 }
 
 func (s *Session) decryptSnapshot(ctx context.Context, response syncResponse) (*Vault, error) {

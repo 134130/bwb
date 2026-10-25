@@ -22,8 +22,8 @@ var ErrAuthentication = errors.New("login required or credentials rejected")
 
 // Client talks to Password Manager endpoints, never the public organization API.
 type Client struct {
-	api, identity, email, deviceID string
-	http                           *http.Client
+	api, identity, email, deviceID, server string
+	http                                   *http.Client
 }
 
 func NewClient(server, email, deviceID string) (*Client, error) {
@@ -54,7 +54,7 @@ func NewClient(server, email, deviceID string) (*Client, error) {
 	case "https://vault.bitwarden.eu":
 		api, identity = "https://api.bitwarden.eu", "https://identity.bitwarden.eu"
 	}
-	return &Client{api: api, identity: identity, email: email, deviceID: deviceID,
+	return &Client{api: api, identity: identity, email: email, deviceID: deviceID, server: base,
 		http: &http.Client{Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
 
@@ -70,6 +70,7 @@ type Session struct {
 	client                  *Client
 	key, access, refresh    *memguard.LockedBuffer
 	protectedKey, accountID string
+	iterations              int
 }
 
 func (s *Session) Close() {
@@ -137,7 +138,7 @@ func (c *Client) Login(ctx context.Context, password []byte) (*Session, error) {
 	defer clear(key)
 	return &Session{client: c, key: memguard.NewBufferFromBytes(key),
 		access:  memguard.NewBufferFromBytes([]byte(response.Access)),
-		refresh: memguard.NewBufferFromBytes([]byte(response.Refresh)), protectedKey: response.Key}, nil
+		refresh: memguard.NewBufferFromBytes([]byte(response.Refresh)), protectedKey: response.Key, iterations: kdf.Iterations}, nil
 }
 
 func (s *Session) Refresh(ctx context.Context) error {
@@ -156,7 +157,9 @@ func (s *Session) Refresh(ctx context.Context) error {
 	if response.Access == "" {
 		return errors.New("incomplete refresh response")
 	}
-	s.access.Destroy()
+	if s.access != nil {
+		s.access.Destroy()
+	}
 	s.access = memguard.NewBufferFromBytes([]byte(response.Access))
 	if response.Refresh != "" {
 		s.refresh.Destroy()

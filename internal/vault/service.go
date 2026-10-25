@@ -2,6 +2,7 @@
 package vault
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"sync"
@@ -9,21 +10,27 @@ import (
 	"github.com/134130/bwb/internal/bitwarden"
 	"github.com/134130/bwb/internal/vaultapi"
 	daemon "github.com/134130/go-daemonkit"
+	"github.com/134130/go-daemonkit/storage"
 	"github.com/google/uuid"
 )
 
-var errLocked = &daemon.RPCError{Code: vaultapi.LockedCode, Message: "vault locked; run login"}
+var errLocked = &daemon.RPCError{Code: vaultapi.LockedCode, Message: "vault locked; run unlock or login"}
 
 type profile struct {
-	gate     chan struct{}
-	cancel   context.CancelFunc
-	session  *bitwarden.Session
-	snapshot *bitwarden.Snapshot
+	gate       chan struct{}
+	epoch      uint64
+	barriers   int
+	cancel     context.CancelFunc
+	session    *bitwarden.Session
+	snapshot   *bitwarden.Snapshot
+	credential string
 }
 
-// Service's zero value is ready for use. The gate owns session access; mu owns
-// membership, cancellation and publication. Network I/O never holds mu.
+// The gate owns session and persistent profile access; mu owns cancellation,
+// generations and publication. Network and native I/O never hold mu.
 type Service struct {
+	Store    *storage.Store
+	Secrets  Credentials
 	mu       sync.Mutex
 	profiles map[string]*profile
 	closed   bool
@@ -61,6 +68,10 @@ func (s *Service) begin(ctx context.Context, name string, create bool) (context.
 		}
 		s.profiles[name] = p
 	}
+	var epoch uint64
+	if p != nil {
+		epoch = p.epoch
+	}
 	s.mu.Unlock()
 	if p == nil {
 		return nil, nil, nil, errLocked
@@ -71,7 +82,7 @@ func (s *Service) begin(ctx context.Context, name string, create bool) (context.
 		return nil, nil, nil, ctx.Err()
 	}
 	s.mu.Lock()
-	if s.closed || s.profiles[name] != p || ctx.Err() != nil {
+	if s.closed || s.profiles[name] != p || p.epoch != epoch || p.barriers != 0 || ctx.Err() != nil {
 		s.mu.Unlock()
 		<-p.gate
 		if err := ctx.Err(); err != nil {
@@ -102,6 +113,22 @@ func (s *Service) Login(ctx context.Context, req vaultapi.LoginRequest) (vaultap
 		return vaultapi.Empty{}, err
 	}
 	defer done()
+	saved, err := s.load(ctx, req.Profile)
+	if err != nil {
+		return vaultapi.Empty{}, err
+	}
+	if saved.Deleting {
+		return vaultapi.Empty{}, errors.New("logout incomplete; retry logout")
+	}
+	if saved.Cache != nil {
+		if !client.Matches(saved.Cache) {
+			return vaultapi.Empty{}, errors.New("profile identity differs; logout before changing account or server")
+		}
+		client, err = bitwarden.NewClient(saved.Cache.Server, saved.Cache.Email, saved.Cache.DeviceID)
+		if err != nil {
+			return vaultapi.Empty{}, err
+		}
+	}
 	session, err := client.Login(ctx, req.Password)
 	if err != nil {
 		return vaultapi.Empty{}, err
@@ -115,6 +142,15 @@ func (s *Service) Login(ctx context.Context, req vaultapi.LoginRequest) (vaultap
 	if err != nil {
 		return vaultapi.Empty{}, err
 	}
+	cache := session.Cache(snapshot)
+	if saved.Cache != nil && saved.Cache.AccountID() != cache.AccountID() {
+		return vaultapi.Empty{}, errors.New("profile account ID changed; logout first")
+	}
+	token := session.RefreshToken()
+	defer clear(token)
+	if err := s.saveLogin(ctx, saved, cache, token); err != nil {
+		return vaultapi.Empty{}, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -126,7 +162,7 @@ func (s *Service) Login(ctx context.Context, req vaultapi.LoginRequest) (vaultap
 	if p.session != nil {
 		p.session.Close()
 	}
-	p.session, p.snapshot = session, snapshot
+	p.session, p.snapshot, p.credential = session, snapshot, saved.Credential
 	session = nil
 	return vaultapi.Empty{}, nil
 }
@@ -163,8 +199,49 @@ func (s *Service) Sync(ctx context.Context, req vaultapi.ProfileRequest) (vaulta
 	if p.session == nil {
 		return vaultapi.Empty{}, errLocked
 	}
-	snapshot, err := p.session.SyncSnapshot(ctx)
+	saved, err := s.load(ctx, req.Profile)
 	if err != nil {
+		return vaultapi.Empty{}, err
+	}
+	if saved.Cache == nil || saved.Deleting {
+		return vaultapi.Empty{}, errLocked
+	}
+	if saved.Credential != p.credential {
+		return vaultapi.Empty{}, errors.New("saved login changed; lock and unlock before syncing")
+	}
+	if err := s.cleanup(ctx, saved); err != nil {
+		return vaultapi.Empty{}, err
+	}
+	token := p.session.RefreshToken()
+	if len(token) == 0 {
+		token, err = s.token(ctx, saved)
+		if err != nil {
+			return vaultapi.Empty{}, err
+		}
+		if err := p.session.SetRefreshToken(token); err != nil {
+			clear(token)
+			return vaultapi.Empty{}, err
+		}
+	}
+	defer clear(token)
+	snapshot, syncErr := p.session.SyncSnapshot(ctx)
+	refreshed := p.session.RefreshToken()
+	defer clear(refreshed)
+	// Persist rotation even when the subsequent sync fails. Native calls may outlive cancellation.
+	// The profile gate keeps logout from racing this write.
+	writeCtx := ctx
+	if !bytes.Equal(token, refreshed) {
+		writeCtx = context.WithoutCancel(ctx)
+	}
+	// Also retry a previous credential write failure before reporting success.
+	if err := s.saveToken(writeCtx, saved, refreshed); err != nil {
+		return vaultapi.Empty{}, errors.Join(syncErr, err)
+	}
+	if syncErr != nil {
+		return vaultapi.Empty{}, syncErr
+	}
+	saved.Cache = p.session.Cache(snapshot)
+	if err := s.put(ctx, req.Profile, saved); err != nil {
 		return vaultapi.Empty{}, err
 	}
 	if err := ctx.Err(); err != nil {
@@ -174,17 +251,68 @@ func (s *Service) Sync(ctx context.Context, req vaultapi.ProfileRequest) (vaulta
 	return vaultapi.Empty{}, nil
 }
 
-func (s *Service) Status(ctx context.Context, req vaultapi.ProfileRequest) (vaultapi.StatusResponse, error) {
-	if err := validProfile(req.Profile); err != nil {
-		return vaultapi.StatusResponse{}, err
+func (s *Service) Unlock(ctx context.Context, req vaultapi.UnlockRequest) (vaultapi.Empty, error) {
+	defer clear(req.Password)
+	ctx, p, done, err := s.begin(ctx, req.Profile, true)
+	if err != nil {
+		return vaultapi.Empty{}, err
 	}
-	if err := ctx.Err(); err != nil {
-		return vaultapi.StatusResponse{}, err
+	defer done()
+	saved, err := s.load(ctx, req.Profile)
+	if err != nil {
+		return vaultapi.Empty{}, err
 	}
+	if saved.Deleting {
+		return vaultapi.Empty{}, errors.New("logout incomplete; retry logout")
+	}
+	if saved.Cache == nil {
+		return vaultapi.Empty{}, errors.New("no saved login; run login")
+	}
+	session, snapshot, err := bitwarden.Unlock(ctx, saved.Cache, req.Password)
+	if err != nil {
+		return vaultapi.Empty{}, err
+	}
+	defer func() {
+		if session != nil {
+			session.Close()
+		}
+	}()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	p := s.profiles[req.Profile]
-	return vaultapi.StatusResponse{Unlocked: p != nil && p.session != nil}, nil
+	if err := ctx.Err(); err != nil {
+		return vaultapi.Empty{}, err
+	}
+	if s.closed || p.barriers != 0 {
+		return vaultapi.Empty{}, errLocked
+	}
+	if p.session != nil {
+		p.session.Close()
+	}
+	p.session, p.snapshot, p.credential = session, snapshot, saved.Credential
+	session = nil
+	return vaultapi.Empty{}, nil
+}
+
+func (s *Service) Status(ctx context.Context, req vaultapi.ProfileRequest) (vaultapi.StatusResponse, error) {
+	ctx, p, done, err := s.begin(ctx, req.Profile, true)
+	if err != nil {
+		return vaultapi.StatusResponse{}, err
+	}
+	defer done()
+	saved, err := s.load(ctx, req.Profile)
+	if err != nil {
+		return vaultapi.StatusResponse{}, err
+	}
+	state := "logged_out"
+	if saved.Deleting {
+		state = "logout_pending"
+	} else if saved.Cache != nil {
+		state = "locked"
+		if p.session != nil {
+			state = "unlocked"
+		}
+	}
+	return vaultapi.StatusResponse{State: state}, nil
 }
 
 func destroy(p *profile) {
@@ -193,28 +321,69 @@ func destroy(p *profile) {
 	if p.session != nil {
 		p.session.Close()
 	}
-	p.session, p.snapshot = nil, nil
+	p.session, p.snapshot, p.credential = nil, nil, ""
 }
 
 func (s *Service) Lock(ctx context.Context, req vaultapi.ProfileRequest) (vaultapi.Empty, error) {
-	if err := validProfile(req.Profile); err != nil {
-		return vaultapi.Empty{}, err
+	return vaultapi.Empty{}, s.clearProfile(ctx, req.Profile, false)
+}
+func (s *Service) Logout(ctx context.Context, req vaultapi.ProfileRequest) (vaultapi.Empty, error) {
+	return vaultapi.Empty{}, s.clearProfile(ctx, req.Profile, true)
+}
+
+func (s *Service) clearProfile(ctx context.Context, name string, logout bool) error {
+	if err := validProfile(name); err != nil {
+		return err
 	}
 	if err := ctx.Err(); err != nil {
-		return vaultapi.Empty{}, err
+		return err
 	}
 	s.mu.Lock()
-	p := s.profiles[req.Profile]
-	delete(s.profiles, req.Profile)
-	if p != nil && p.cancel != nil {
+	if s.closed {
+		s.mu.Unlock()
+		return errLocked
+	}
+	p := s.profiles[name]
+	if p == nil {
+		p = &profile{gate: make(chan struct{}, 1)}
+		if s.profiles == nil {
+			s.profiles = make(map[string]*profile)
+		}
+		s.profiles[name] = p
+	}
+	// Keep the gate across lock/logout; a replacement must not overtake persistent cleanup.
+	p.epoch++
+	p.barriers++
+	if p.cancel != nil {
 		p.cancel()
 	}
 	s.mu.Unlock()
-	// Once accepted, finish destruction even if the caller disconnects.
-	if p != nil {
-		destroy(p)
+	p.gate <- struct{}{}
+	defer func() { s.mu.Lock(); p.barriers--; s.mu.Unlock(); <-p.gate }()
+	if p.session != nil {
+		p.session.Close()
 	}
-	return vaultapi.Empty{}, nil
+	p.session, p.snapshot, p.credential = nil, nil, ""
+	if !logout {
+		return nil
+	}
+	// Once logout is accepted, finish its durable tombstone even if the caller disconnects.
+	ctx = context.WithoutCancel(ctx)
+	saved, err := s.load(ctx, name)
+	if err != nil {
+		return err
+	}
+	if saved.Credential != "" {
+		saved.Garbage = append(saved.Garbage, saved.Credential)
+	}
+	saved.Cache, saved.Credential, saved.Deleting = nil, "", true
+	if err := s.put(ctx, name, saved); err != nil {
+		return err
+	}
+	if err := s.cleanup(ctx, saved); err != nil {
+		return err
+	}
+	return s.put(ctx, name, nil)
 }
 
 func (s *Service) Shutdown(context.Context) error {

@@ -3,6 +3,7 @@
 package bitwarden
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -101,6 +102,53 @@ func TestSnapshotIntegration(t *testing.T) {
 	}
 	if len(types) != 8 {
 		t.Fatal("missing cipher type")
+	}
+	snapshot, err := session.SyncSnapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(session.Cache(snapshot))
+	if err != nil {
+		t.Fatal(err)
+	}
+	refresh := session.RefreshToken()
+	if bytes.Contains(encoded, []byte(manifest.Password)) || bytes.Contains(encoded, refresh) || bytes.Contains(encoded, []byte("DEMO-only-password-1!")) {
+		t.Fatal("cache contains plaintext credentials")
+	}
+	clear(refresh)
+	var cached Cache
+	if err := json.Unmarshal(encoded, &cached); err != nil {
+		t.Fatal(err)
+	}
+	unlocked, cachedSnapshot, err := Unlock(ctx, &cached, []byte(manifest.Password))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unlocked.access != nil || unlocked.refresh != nil {
+		t.Fatal("offline unlock restored network credentials")
+	}
+	value, err := unlocked.Read(cachedSnapshot, manifest.Items["20000000-0000-4000-8000-000000000001"], "login/password")
+	if err != nil || value != "DEMO-only-password-1!" {
+		t.Fatal("cached read mismatch", err)
+	}
+	unlocked.Close()
+	for _, mutate := range []func(*Cache){
+		func(c *Cache) { c.Version++ },
+		func(c *Cache) { c.KDF = 1 },
+		func(c *Cache) { c.Iterations = 2147483647 },
+		func(c *Cache) { c.Email = "other@example.invalid" },
+		func(c *Cache) { c.Snapshot.Profile.Email = "other@example.invalid" },
+		func(c *Cache) { c.Snapshot.Ciphers[0] = json.RawMessage(`{"id":"bad"}`) },
+	} {
+		var broken Cache
+		if err := json.Unmarshal(encoded, &broken); err != nil {
+			t.Fatal(err)
+		}
+		mutate(&broken)
+		if leaked, _, err := Unlock(ctx, &broken, []byte(manifest.Password)); err == nil {
+			leaked.Close()
+			t.Fatal("invalid persisted cache unlocked")
+		}
 	}
 	// A real server ciphertext must not yield any plaintext after tampering.
 	var encrypted syncResponse

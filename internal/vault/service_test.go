@@ -47,9 +47,8 @@ func TestLockCancelsActiveAndRejectsQueuedOperation(t *testing.T) {
 		if err := <-locked; err != nil {
 			t.Fatal(err)
 		}
-		status, err := s.Status(context.Background(), vaultapi.ProfileRequest{Profile: "default"})
-		if err != nil || status.Unlocked {
-			t.Fatal("profile unlocked after lock", err)
+		if s.profiles["default"].session != nil || s.profiles["default"].barriers != 0 {
+			t.Fatal("lock left live state")
 		}
 	})
 }

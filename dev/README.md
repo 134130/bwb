@@ -4,7 +4,7 @@
 
 ## 실행
 
-Docker, Python 3.11+, mise.toml에 고정된 Go가 필요하다. 저장소 루트에서:
+Docker, Python 3.11+, mise.toml에 고정된 Go, 사용 가능한 OS credential store가 필요하다. macOS는 cgo/Keychain, Linux는 session D-Bus의 Secret Service가 필요하며 native store가 없으면 테스트를 실패시킨다. 저장소 루트에서:
 
 ```sh
 python3 -m venv .dev/venv
@@ -27,12 +27,14 @@ runner는 SHA-256 검사 → SQLite 복원·무결성 검사 → digest로 고�
 - fixture/dump checksum 일치, SQL 무결성·foreign key 검사.
 - Go 제품 코드의 암호문 변조·잘못된 키·padding 오류 거부, 독립 Python KDF/cipher vector 대조, 기대 필드 누락/값 변경 감지.
 - 실제 바이너리의 daemon 자동 기동, 별도 CLI 프로세스의 비밀번호/빈 값/여러 줄 출력, offline read 시 HTTP 0회, 실패한 sync/재로그인 후 cache 유지.
-- profile 격리, 진행 중 login의 lock 취소, lock 후 조회 거부, 종료·재시작 후 잠금, 재로그인.
+- profile identity 변경 거부, 진행 중 login의 lock 취소, lock 후 조회 거부, 종료·재시작 후 오프라인 unlock과 HTTP 0회.
+- 실제 OS keychain에 저장한 refresh token으로 재시작 후 sync, 반복 재시작, logout 후 unlock 거부·다른 profile 유지.
+- cache version/KDF/계정/암호문 검증, native 쓰기 실패·취소·삭제 실패의 정리 목록 복구, SQLite chunk 원자 저장.
 - 입력 제한, API redirect 차단·응답 크기·KDF 비용 상한, synctest 기반 작업 취소와 shutdown 검증.
 
 Python runner는 복원된 서버의 URL을 테스트 자식 프로세스에 전달하고 `go test -tags=integration -count=1`을 실행한다. integration 태그 없이 `go test ./...`를 실행하면 Docker 없는 단위 검사만 실행한다. integration 태그가 있는데 서버 URL이 없으면 skip하지 않고 실패한다.
 
-Python crypto helper는 snapshot 재생성/재생성 결과 검사에만 남겨둔다. 일반 integration은 Go 코드로 검증한다. CLI 테스트는 임시 state 경로에 daemon을 실행하고 종료·정리한다. 키·토큰은 memguard로 보관하며 명시적 파기는 단위 테스트로 검사한다. TUI·keychain·디스크 cache·Argon2id·2FA·조직/item별 키·첨부파일은 후속이다. 현재 offline read는 살아 있는 daemon 세션에서만 지원한다.
+Python crypto helper는 snapshot 재생성/재생성 결과 검사에만 남겨둔다. 일반 integration은 Go 코드로 검증한다. CLI 테스트는 임시 state 경로와 고유 `BWB_INSTANCE`에 daemon을 실행한다. 정상 종료 시 각 profile을 logout해 전용 keychain 항목을 지우고 daemon/state를 정리한다. 강제 종료 시 해당 instance의 `logout`으로 남은 credential 정리 목록을 처리할 수 있다. 키·토큰은 memguard로 보관하며 명시적 파기는 단위 테스트로 검사한다. TUI·Argon2id·2FA·조직/item별 키·첨부파일은 후속이다. 현재 offline read는 살아 있는 세션이나 저장된 cache를 비밀번호로 unlock한 뒤 지원한다. 네이티브 keychain 경로는 실제 integration으로 검사하며, 장애 복구 단위 테스트만 의도적으로 실패를 주입한다.
 
 ## 데이터 / 타입 추가
 

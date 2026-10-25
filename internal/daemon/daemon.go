@@ -3,13 +3,16 @@ package daemon
 
 import (
 	"context"
+	"os"
 
 	"github.com/134130/bwb/internal/vault"
 	"github.com/134130/bwb/internal/vaultapi"
 	kit "github.com/134130/go-daemonkit"
 )
 
-func Options() kit.Options           { return kit.Options{AppID: "bwb", Version: "dev"} }
+func Options() kit.Options {
+	return kit.Options{AppID: "bwb", Version: "dev", InstanceID: os.Getenv("BWB_INSTANCE")}
+}
 func Manager() (*kit.Manager, error) { return kit.NewManager(Options(), "daemon", "run") }
 
 func Connect(ctx context.Context) (*kit.Client, error) {
@@ -28,8 +31,22 @@ func Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	service := &vault.Service{}
+	store, err := app.Storage("vault")
+	if err != nil {
+		return err
+	}
+	secrets, err := app.Secrets("vault")
+	if err != nil {
+		return err
+	}
+	service := &vault.Service{Store: store, Secrets: secrets}
 	if err := app.Register(service); err != nil {
+		return err
+	}
+	if err := app.Handle(vaultapi.Unlock, service.Unlock); err != nil {
+		return err
+	}
+	if err := app.Handle(vaultapi.Logout, service.Logout); err != nil {
 		return err
 	}
 	if err := app.Handle(vaultapi.Login, service.Login); err != nil {

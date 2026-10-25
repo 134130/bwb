@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/google/uuid"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -41,11 +42,12 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 		t.Fatalf("build: %v: %s", err, output)
 	}
 	// Keep the Unix socket path within the platform limit.
-	state, err := os.MkdirTemp("", "bwb-")
+	state, err := os.MkdirTemp("/tmp", "bwb-")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(state)
+	instance := uuid.NewString()
 	target, err := url.Parse(server)
 	if err != nil {
 		t.Fatal(err)
@@ -73,7 +75,7 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 		defer cancel()
 		command := exec.CommandContext(ctx, binary, args...)
-		command.Env = append(os.Environ(), "XDG_STATE_HOME="+state)
+		command.Env = append(os.Environ(), "XDG_STATE_HOME="+state, "BWB_INSTANCE="+instance)
 		command.Stdin = strings.NewReader(password)
 		var stdout, stderr bytes.Buffer
 		command.Stdout, command.Stderr = &stdout, &stderr
@@ -94,6 +96,11 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 		}
 	}
 	defer func() {
+		for _, profile := range []string{"default", "other"} {
+			if output, err := run("", "--profile", profile, "logout"); err != nil {
+				t.Errorf("credential cleanup: %v %s", err, output)
+			}
+		}
 		if output, err := run("", "daemon", "stop"); err != nil {
 			t.Errorf("daemon cleanup: %v %s", err, output)
 		}
@@ -105,8 +112,9 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	}
 	login := []string{"login", "--server", endpoint.URL, "--email", manifest.Email, "--password-stdin"}
 	must(manifest.Password+"\n", "", login...)
+	must("", "", "daemon", "update")
 	must("", "unlocked\n", "status")
-	must("", "locked\n", "--profile", "other", "status")
+	must("", "logged_out\n", "--profile", "other", "status")
 	before := requests.Load()
 	offline.Store(true)
 	for _, tc := range []struct{ fixtureID, path, want string }{
@@ -126,6 +134,13 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	must("", "DEMO-only-password-1!", "read", id, "login/password")
 	offline.Store(false)
 	must("", "", "sync")
+	before = requests.Load()
+	if _, err := run(manifest.Password+"\n", "login", "--server", endpoint.URL, "--email", "other@example.invalid", "--password-stdin"); err == nil {
+		t.Fatal("profile rebound without logout")
+	}
+	if requests.Load() != before {
+		t.Fatal("identity conflict reached network")
+	}
 	if _, err := run("wrong-password\n", login...); err == nil {
 		t.Fatal("bad login succeeded")
 	}
@@ -161,6 +176,38 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	if output, err := run("", "--profile", "other", "read", id, "login/password"); err == nil || !strings.Contains(output, "vault locked") {
 		t.Fatal("session survived restart", err, output)
 	}
-	must(manifest.Password+"\n", "", login...)
+	offline.Store(true)
+	before = requests.Load()
+	if _, err := run("wrong-password\n", "unlock", "--password-stdin"); err == nil {
+		t.Fatal("wrong password unlocked persisted cache")
+	}
+	must("", "locked\n", "status")
+	must(manifest.Password+"\n", "", "unlock", "--password-stdin")
 	must("", "DEMO-only-password-1!", "read", id, "login/password")
+	if requests.Load() != before {
+		t.Fatal("offline unlock contacted server")
+	}
+	must("", "", "lock")
+	must(manifest.Password+"\n", "", "unlock", "--password-stdin")
+	offline.Store(false)
+	before = requests.Load()
+	must("", "", "sync")
+	if requests.Load() < before+2 {
+		t.Fatal("restart did not refresh using persisted token")
+	}
+	// A second restart proves the latest credential remains usable.
+	must("", "", "daemon", "stop")
+	must(manifest.Password+"\n", "", "unlock", "--password-stdin")
+	must("", "", "sync")
+	must("", "", "logout")
+	must("", "logged_out\n", "status")
+	if _, err := run(manifest.Password+"\n", "unlock", "--password-stdin"); err == nil {
+		t.Fatal("logout preserved local unlock")
+	}
+	must(manifest.Password+"\n", "", "--profile", "other", "unlock", "--password-stdin")
+	must("", "DEMO-only-password-1!", "--profile", "other", "read", id, "login/password")
+	must("", "", "daemon", "stop")
+	if _, err := run(manifest.Password+"\n", "unlock", "--password-stdin"); err == nil {
+		t.Fatal("logout did not survive restart")
+	}
 }
