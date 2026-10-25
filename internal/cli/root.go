@@ -20,6 +20,8 @@ import (
 func NewRoot() *cobra.Command {
 	root := &cobra.Command{Use: "bwb", Short: "Browse and read Bitwarden vaults through a local daemon", SilenceUsage: true, SilenceErrors: true}
 	var profile string
+	var configPath string
+	root.PersistentFlags().StringVar(&configPath, "config", "", "Config file (overrides BWB_CONFIG)")
 	var nonInteractive bool
 	root.PersistentFlags().BoolVar(&nonInteractive, "non-interactive", false, "Never prompt for authentication")
 	root.PersistentFlags().StringVar(&profile, "profile", "default", "Vault profile")
@@ -27,15 +29,17 @@ func NewRoot() *cobra.Command {
 	var passwordStdin bool
 	login := &cobra.Command{Use: "login", Short: "Log in and cache an encrypted snapshot", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if _, err := bitwarden.NewClient(server, email, uuid.NewString()); err != nil {
-				return err
+			if server != "" && email != "" {
+				if _, err := bitwarden.NewClient(server, email, uuid.NewString()); err != nil {
+					return err
+				}
 			}
 			password, err := commandPassword(cmd, passwordStdin, nonInteractive, authPrompt{Action: "login", Profile: profile, Server: server, Email: email})
 			if err != nil {
 				return err
 			}
 			defer clear(password)
-			client, err := daemon.Connect(cmd.Context())
+			client, err := connectCommand(cmd)
 			if err != nil {
 				return err
 			}
@@ -46,8 +50,6 @@ func NewRoot() *cobra.Command {
 	login.Flags().StringVar(&server, "server", "", "Vault URL (HTTPS, or loopback HTTP)")
 	login.Flags().StringVar(&email, "email", "", "Account email")
 	login.Flags().BoolVar(&passwordStdin, "password-stdin", false, "Read master password from stdin")
-	_ = login.MarkFlagRequired("server")
-	_ = login.MarkFlagRequired("email")
 	var unlockStdin bool
 	unlock := &cobra.Command{Use: "unlock", Short: "Unlock a saved vault without network access", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		password, err := commandPassword(cmd, unlockStdin, nonInteractive, authPrompt{Action: "unlock", Profile: profile})
@@ -55,7 +57,7 @@ func NewRoot() *cobra.Command {
 			return err
 		}
 		defer clear(password)
-		client, err := daemon.Connect(cmd.Context())
+		client, err := connectCommand(cmd)
 		if err != nil {
 			return err
 		}
@@ -65,7 +67,7 @@ func NewRoot() *cobra.Command {
 	}}
 	unlock.Flags().BoolVar(&unlockStdin, "password-stdin", false, "Read master password from stdin")
 	logout := &cobra.Command{Use: "logout", Short: "Delete saved credentials and encrypted cache for this profile", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		client, err := daemon.Connect(cmd.Context())
+		client, err := connectCommand(cmd)
 		if err != nil {
 			return err
 		}
@@ -78,7 +80,7 @@ func NewRoot() *cobra.Command {
 			if id, err := uuid.Parse(args[0]); err != nil || id == uuid.Nil || id.String() != args[0] {
 				return errors.New("invalid item ID")
 			}
-			client, err := daemon.Connect(cmd.Context())
+			client, err := connectCommand(cmd)
 			if err != nil {
 				return err
 			}
@@ -93,7 +95,7 @@ func NewRoot() *cobra.Command {
 		}}
 	sync := &cobra.Command{Use: "sync", Short: "Refresh the encrypted snapshot", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := daemon.Connect(cmd.Context())
+			client, err := connectCommand(cmd)
 			if err != nil {
 				return err
 			}
@@ -151,7 +153,16 @@ func NewRoot() *cobra.Command {
 		}}
 	control := &cobra.Command{Use: "daemon", Short: "Manage the local daemon"}
 	control.AddCommand(&cobra.Command{Use: "run", Short: "Run the daemon in the foreground", Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error { return daemon.Run(cmd.Context()) }})
+		RunE: func(cmd *cobra.Command, _ []string) error { return daemon.Run(cmd.Context(), configPath) }})
+	control.AddCommand(&cobra.Command{Use: "reload", Short: "Validate and apply the running daemon's config file", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		client, err := kit.Connect(cmd.Context(), daemon.Options())
+		if err != nil {
+			return err
+		}
+		defer client.Close()
+		_, err = client.Invoke(cmd.Context(), vaultapi.Reload, vaultapi.Empty{})
+		return err
+	}})
 	control.AddCommand(&cobra.Command{Use: "stop", Short: "Stop the daemon and destroy all sessions", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			manager, err := daemon.Manager()
@@ -174,6 +185,11 @@ func NewRoot() *cobra.Command {
 	for _, kind := range []string{"item", "folder", "organization", "collection"} {
 		root.AddCommand(listCommand(kind, &profile, &nonInteractive))
 	}
+	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
+		return prepareConfig(cmd, configPath, &profile, root.PersistentFlags().Changed("profile"))
+	}
+	configuration, profiles := configCommands()
+	root.AddCommand(configuration, profiles)
 	root.AddCommand(login, unlock, logout, read, sync, lock, status, control)
 	return root
 }

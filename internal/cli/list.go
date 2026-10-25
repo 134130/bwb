@@ -11,7 +11,6 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/134130/bwb/internal/daemon"
 	"github.com/134130/bwb/internal/vault"
 	"github.com/134130/bwb/internal/vaultapi"
 	"github.com/spf13/cobra"
@@ -33,7 +32,7 @@ func listCommand(kind string, profile *string, nonInteractive *bool) *cobra.Comm
 			if err := vault.ValidateList(req); err != nil {
 				return err
 			}
-			client, err := daemon.Connect(cmd.Context())
+			client, err := connectCommand(cmd)
 			if err != nil {
 				return err
 			}

@@ -56,6 +56,7 @@ type brokenListWriter struct{}
 
 func (brokenListWriter) Write([]byte) (int, error) { return 0, errors.New("write failed") }
 func TestListOutputErrorsAndFlagValidation(t *testing.T) {
+	isolateConfig(t)
 	if err := writeList(brokenListWriter{}, "item", "table", "", nil); err == nil {
 		t.Fatal("output error ignored")
 	}

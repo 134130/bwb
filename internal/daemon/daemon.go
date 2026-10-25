@@ -3,6 +3,7 @@ package daemon
 
 import (
 	"context"
+	"github.com/134130/bwb/internal/config"
 	"os"
 
 	"github.com/134130/bwb/internal/vault"
@@ -26,7 +27,15 @@ func Connect(ctx context.Context) (*kit.Client, error) {
 	return kit.Connect(ctx, Options())
 }
 
-func Run(ctx context.Context) error {
+func Run(ctx context.Context, configFlag string) error {
+	path, explicit, err := config.Path(configFlag)
+	if err != nil {
+		return err
+	}
+	file, err := config.Load(path, explicit)
+	if err != nil {
+		return err
+	}
 	app, err := kit.New(Options())
 	if err != nil {
 		return err
@@ -39,8 +48,17 @@ func Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	service := &vault.Service{Store: store, Secrets: secrets}
+	service := &vault.Service{Store: store, Secrets: secrets, InitialConfig: file}
 	if err := app.Register(service); err != nil {
+		return err
+	}
+	if err := app.Handle(vaultapi.Reload, rpcHandler(func(ctx context.Context, _ vault.Empty) (vault.Empty, error) {
+		file, err := config.Load(path, true)
+		if err != nil {
+			return vault.Empty{}, err
+		}
+		return vault.Empty{}, service.ApplyConfig(ctx, file)
+	})); err != nil {
 		return err
 	}
 	if err := app.Handle(vaultapi.WatchAuth, rpcHandler(service.WatchAuth)); err != nil {

@@ -11,6 +11,7 @@ import (
 )
 
 func TestHelpAndInputErrors(t *testing.T) {
+	isolateConfig(t)
 	root := NewRoot()
 	var help bytes.Buffer
 	root.SetOut(&help)
@@ -40,6 +41,7 @@ func TestHelpAndInputErrors(t *testing.T) {
 }
 
 func TestPasswordInputBounded(t *testing.T) {
+	isolateConfig(t)
 	for _, input := range []string{"", "\n", strings.Repeat("x", 4099), strings.Repeat("x", 4096) + "\r\n" + "ignored"} {
 		root := NewRoot()
 		root.SetIn(strings.NewReader(input))
@@ -54,6 +56,7 @@ func TestPasswordInputBounded(t *testing.T) {
 }
 
 func TestPasswordInputCancellation(t *testing.T) {
+	isolateConfig(t)
 	synctest.Test(t, func(t *testing.T) {
 		reader, writer := io.Pipe()
 		defer reader.Close()

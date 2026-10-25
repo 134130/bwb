@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/134130/bwb/internal/vaultapi"
 	"github.com/google/uuid"
 	"io"
@@ -53,6 +54,9 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(state)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(state, "config"))
+	t.Setenv("BWB_CONFIG", "")
+	t.Setenv("BWB_PROFILE", "")
 	instance := uuid.NewString()
 	target, err := url.Parse(server)
 	if err != nil {
@@ -112,7 +116,7 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 		}
 	}
 	defer func() {
-		for _, profile := range []string{"default", "other", "restricted"} {
+		for _, profile := range []string{"default", "other", "restricted", "timed", "steady"} {
 			if output, err := run("", "--profile", profile, "logout"); err != nil {
 				t.Errorf("credential cleanup: %v %s", err, output)
 			}
@@ -373,4 +377,84 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	if _, err := run(manifest.Password+"\n", "unlock", "--password-stdin"); err == nil {
 		t.Fatal("logout did not survive restart")
 	}
+	// Daemon loads config at startup; edits take effect only through reload.
+	must("", "", "daemon", "stop")
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	configText := fmt.Sprintf("version = 1\ndefault_profile = \"timed\"\n[profiles.timed]\nserver = %q\nemail = %q\nlock_timeout = \"1s\"\n[profiles.steady]\nserver = %q\nemail = %q\nlock_timeout = \"0s\"\n", endpoint.URL, manifest.Email, endpoint.URL, manifest.Email)
+	if err := os.WriteFile(configPath, []byte(configText), 0600); err != nil {
+		t.Fatal(err)
+	}
+	must("", "config valid\n", "--config", configPath, "config", "validate")
+	must(manifest.Password+"\n", "", "--config", configPath, "login", "--password-stdin")
+	must(manifest.Password+"\n", "", "--config", configPath, "--profile", "steady", "login", "--password-stdin")
+	waitLocked := func() {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			output, err := run("", "--profile", "timed", "status")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if output == "locked\n" {
+				return
+			}
+			time.Sleep(25 * time.Millisecond)
+		}
+		t.Fatal("idle timeout did not lock profile")
+	}
+	waitLocked()
+	must("", "unlocked\n", "--profile", "steady", "status")
+	offline.Store(true)
+	before = requests.Load()
+	terminal("success", "DEMO-only-password-1!", "--config", configPath, "read", id, "login/password")
+	if requests.Load() != before {
+		t.Fatal("config/idle recovery contacted server")
+	}
+	// Changing config cannot rebind existing credentials.
+	changed := strings.Replace(configText, manifest.Email, "wrong@example.invalid", 1)
+	if err := os.WriteFile(configPath, []byte(changed), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := run("", "daemon", "reload"); err == nil || !strings.Contains(output, "identity differs") {
+		t.Fatal("configured identity mismatch was not blocked", err, output)
+	}
+	if err := os.WriteFile(configPath, []byte(configText), 0600); err != nil {
+		t.Fatal(err)
+	}
+	must("", "", "daemon", "stop")
+	// Restart loads the same explicitly selected config.
+	must(manifest.Password+"\n", "", "--config", configPath, "--profile", "timed", "unlock", "--password-stdin")
+	waitLocked()
+	if requests.Load() != before {
+		t.Fatal("restart unlock/status contacted server")
+	}
+	offline.Store(false)
+	must(manifest.Password+"\n", "", "--config", configPath, "unlock", "--password-stdin")
+	must("", "", "--config", configPath, "sync")
+	waitLocked()
+	// Direct edits do not affect live policy until a successful reload.
+	must(manifest.Password+"\n", "", "--profile", "steady", "unlock", "--password-stdin")
+	changed = strings.Replace(configText, `lock_timeout = "0s"`, `lock_timeout = "100ms"`, 1)
+	if err := os.WriteFile(configPath, []byte(changed), 0600); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(150 * time.Millisecond)
+	must("", "unlocked\n", "--profile", "steady", "status")
+	must("", "", "daemon", "reload")
+	must("", "locked\n", "--profile", "steady", "status")
+	if err := os.WriteFile(configPath, []byte("version = ["), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run("", "daemon", "reload"); err == nil {
+		t.Fatal("malformed reload accepted")
+	}
+	must(manifest.Password+"\n", "", "--config", configPath, "--profile", "timed", "unlock", "--password-stdin")
+	waitLocked()
+	must("", "", "--config", configPath, "--profile", "steady", "lock")
+	must("", "", "--config", configPath, "--profile", "timed", "logout")
+	must("", "", "--config", configPath, "--profile", "steady", "logout")
+	if err := os.WriteFile(configPath, []byte(configText), 0600); err != nil {
+		t.Fatal(err)
+	}
+
 }

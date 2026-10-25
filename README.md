@@ -4,7 +4,7 @@ Bitwarden를 CLI와 TUI로 사용하는 Go 클라이언트. 현재는 Cobra CLI 
 
 - [요구사항과 인터페이스 제안](docs/design.md)
 - [Full integration 개발 환경](dev/README.md)
-- [제안 config](dev/config.example.toml)
+- [예제 config](dev/config.example.toml)
 
 최종 설계 방향: CLI + TUI, go-daemonkit daemon, Bitwarden API 직접 호출.
 서버 login과 로컬 unlock을 분리하고, 명령이 필요한 인증을 거쳐 재개된다.
@@ -47,7 +47,7 @@ go build -o .dev/bwb .
 
 SQLite와 keychain은 분산 트랜잭션이 아니므로 credential 참조와 정리 목록을 먼저 기록한다. 인증 실패는 이전 cache를 유지하며, 미완료 credential 쓰기와 이전 credential은 다음 login/sync/logout에서 정리한다. 이미 커밋된 저장은 취소로 되돌리지 않는다. 저장된 로그인과 메모리 세션의 세대가 달라지면 sync는 재잠금·unlock을 요구해 이전 token으로 새 credential을 덮어쓰지 않는다. keychain 장애 시 평문 파일 fallback은 없다. OS keychain 호출은 진행 중 취소할 수 없어 lock/logout이 그 호출을 기다릴 수 있다. 서버 token 회전 직후 프로세스가 중단되면 재로그인이 필요할 수 있다. logout은 논리적 삭제이며 SQLite 잔여 페이지나 백업의 물리적 소거를 보장하지 않는다.
 
-새 바이너리를 빌드한 뒤 `.dev/bwb daemon update`로 daemonkit이 선택한 실행 파일을 갱신한다. 다른 내용의 바이너리면 daemon이 재시작되어 unlock이 필요하다. 동일 바이너리는 no-op이다. config 파일·idle timeout은 후속이다.
+새 바이너리를 빌드한 뒤 `.dev/bwb daemon update`로 daemonkit이 선택한 실행 파일을 갱신한다. 다른 내용의 바이너리면 daemon이 재시작되어 unlock이 필요하다. 동일 바이너리는 no-op이다. config 파일과 profile별 idle timeout을 지원한다.
 
 대화형 `login/unlock`은 `--password-stdin` 없이도 비밀번호를 입력받는다. `read/list/sync`의 자동 인증은 stdin이 TTY이고 `--non-interactive`가 아닐 때만 실행한다. stdout이 pipe여도 prompt는 controlling terminal에 표시하므로 출력 데이터와 섞이지 않는다. 비TTY 실행은 입력을 소비하지 않고 인증 필요 오류를 반환한다. 최초 로그인 정보가 없는 profile은 `login --server ... --email ...`로 먼저 준비한다.
 
@@ -85,3 +85,22 @@ integration은 실제 Vaultwarden에서 Go API 코드와 빌드된 CLI·daemon�
 `--format json`은 `{"version":1,"data":[...]}` 형태의 평면 배열이다. 각 항목의 organization/folder는 `{id,name}`, collections는 같은 구조의 배열이며 없는 선택 필드는 생략한다. 비밀번호·메모·사용자명·URL·custom field는 목록에 포함하지 않는다. JSON은 원래 문자열을 보존하며 grouping으로 항목을 중복하지 않는다.
 
 첫 목록 요청에서 이름·소속 metadata만 복호화해 profile 메모리에 index를 만든다. 원문 비밀 필드는 index에 넣지 않으며 후속 목록은 index를 재사용한다. 이름 자체는 민감할 수 있고 Go 메모리 index의 즉시 zeroize는 보장하지 않는다. 성공한 login/unlock/sync와 lock/logout/shutdown에서 index 참조를 폐기한다. RPC는 최대 128행·JSON 48 KiB씩 전달하며 cursor는 profile/query/index generation에 묶인다. 한 행이 한도를 넘으면 명시적으로 실패한다. CLI는 전 페이지를 받은 뒤 출력하며 도중 snapshot 변경은 부분 출력 없이 재실행을 요구한다. 자동 인증은 목록 전체를 최대 한 번 재시도한다.
+
+Config는 `${XDG_CONFIG_HOME:-$HOME/.config}/bwb/config.toml`에서 읽는다(macOS도 동일). `--config > BWB_CONFIG > 기본 경로`로 한 파일만 선택하며 병합하지 않는다. 기본 파일이 없으면 기존 명령을 그대로 사용하고, 명시한 파일이 없으면 실패한다. TOML schema는 [예제](dev/config.example.toml)를 따른다. Version 1, 존재하는 default_profile, `[a-z][a-z0-9_-]{0,31}` profile 이름, 서버·이메일·비음수 lock_timeout을 검증한다. 생략된 timeout은 0s이며 알 수 없는 키(비밀번호/token 포함)는 거부한다. 파일을 만들거나 수정하는 명령은 아직 없다.
+
+```sh
+bwb config path
+bwb config validate
+bwb profile list
+bwb profile show personal
+bwb --profile personal login                 # config의 서버·이메일 사용
+bwb --config ./test.toml item list
+```
+
+Profile 선택은 `--profile > BWB_PROFILE > default_profile > default`다. 명시적 profile이나 BWB_PROFILE이 있으면 일반 명령은 TOML을 읽지 않는다. 기본 profile 결정과 `config/profile` 검사 명령만 파일을 읽는다. `profile list/show`는 디스크의 설정을 보여주며 실행 중 daemon 설정을 의미하지 않는다. Login의 생략된 server/email은 daemon에 적용된 profile에서 가져오며, 명시한 값이 해당 identity와 다르면 거부한다. 잘못된 TOML에서도 `--profile NAME lock/logout/status`와 daemon stop은 실행 가능하다.
+
+Daemon은 시작할 때 설정 경로를 확정하고 server/email/lock_timeout을 읽는다. 자동 시작 시 `--config` 또는 BWB_CONFIG의 경로를 전달한다. 이미 실행 중인 daemon의 파일 경로는 이후 CLI의 `--config`로 변경되지 않는다. 다른 경로를 쓰려면 daemon을 종료하고 새 경로로 시작한다. 재시작에도 같은 경로를 사용하려면 BWB_CONFIG를 설정하거나 `--config`를 다시 전달한다. `daemon run --config ...`는 foreground 실행 경로를 지정한다.
+
+직접 파일을 수정한 뒤 `bwb config validate`, `bwb daemon reload`를 실행한다. Reload는 daemon 시작 시 선택한 파일 전체를 검증하고 성공할 때만 정책을 교체한다. 문법 오류·누락 파일·로그인된 profile의 identity 변경이나 삭제는 기존 정책을 유지한 채 거부한다. Identity 변경/삭제는 먼저 해당 profile을 logout한다. Logout은 인증 상태만 지우며 TOML 정의는 유지한다. Watcher는 없고 일반 조회는 정책을 적용하지 않는다. 정책은 DB에 저장하지 않으며, 이전 개발 버전의 DB policy 필드는 무시한다(인증 캐시는 유지).
+
+`lock_timeout = "0s"`는 자동 잠금을 끈다. 양수면 login/unlock 완료부터 계산하고 성공한 read/list에서 갱신한다. Status·sync·reload·실패한 조회는 연장하지 않는다. Reload로 시간이 줄어 이미 만료됐다면 잠금 처리하고 요청 진입에서도 deadline을 검사한다. 만료 시 진행 작업 취소, 키·목록 index 파기를 수행하며 cache/keychain 로그인은 유지한다. 다음 대화형 read/list는 기존 자동 unlock 후 재개한다. Native keychain 호출은 진행 중 취소할 수 없어 실제 파기 완료가 늦어질 수 있다.

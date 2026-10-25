@@ -6,36 +6,45 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/134130/bwb/internal/bitwarden"
+	"github.com/134130/bwb/internal/config"
 	"github.com/134130/go-daemonkit/storage"
 	"github.com/google/uuid"
 )
 
 type profile struct {
-	catalog      bitwarden.Catalog
-	catalogID    string
-	gate         chan struct{}
-	epoch        uint64
-	barriers     int
-	cancel       context.CancelFunc
-	session      *bitwarden.Session
-	snapshot     *bitwarden.Snapshot
-	credential   string
-	auth         *authAttempt
-	previousAuth *authAttempt
-	authVersion  uint64
-	needsLogin   bool
+	idleTimeout                time.Duration
+	idleTimer                  *time.Timer
+	idleVersion                uint64
+	idleDeadline, lastActivity time.Time
+	catalog                    bitwarden.Catalog
+	catalogID                  string
+	gate                       chan struct{}
+	epoch                      uint64
+	barriers                   int
+	cancel                     context.CancelFunc
+	session                    *bitwarden.Session
+	snapshot                   *bitwarden.Snapshot
+	credential                 string
+	auth                       *authAttempt
+	previousAuth               *authAttempt
+	authVersion                uint64
+	needsLogin                 bool
 }
 
 // The gate owns session and persistent profile access; mu owns cancellation,
 // generations and publication. Network and native I/O never hold mu.
 type Service struct {
-	Store    *storage.Store
-	Secrets  Credentials
-	mu       sync.Mutex
-	profiles map[string]*profile
-	closed   bool
+	InitialConfig *config.File
+	configMu      sync.RWMutex
+	policies      map[string]config.Profile
+	Store         *storage.Store
+	Secrets       Credentials
+	mu            sync.Mutex
+	profiles      map[string]*profile
+	closed        bool
 }
 
 func validProfile(name string) error {
@@ -51,6 +60,13 @@ func validProfile(name string) error {
 }
 
 func (s *Service) begin(ctx context.Context, name string, create bool) (context.Context, *profile, func(), error) {
+	s.configMu.RLock()
+	admitted := false
+	defer func() {
+		if !admitted {
+			s.configMu.RUnlock()
+		}
+	}()
 	if err := validProfile(name); err != nil {
 		return nil, nil, nil, err
 	}
@@ -92,10 +108,28 @@ func (s *Service) begin(ctx context.Context, name string, create bool) (context.
 		}
 		return nil, nil, nil, ErrStateChanged
 	}
+	// Enforce deadlines on admission even if the timer goroutine has not run yet.
+	if !p.idleDeadline.IsZero() && !time.Now().Before(p.idleDeadline) {
+		s.invalidate(p)
+		s.mu.Unlock()
+		clearMemory(p)
+		s.mu.Lock()
+		p.barriers--
+		if s.closed || s.profiles[name] != p || p.barriers != 0 || ctx.Err() != nil {
+			s.mu.Unlock()
+			<-p.gate
+			if err := ctx.Err(); err != nil {
+				return nil, nil, nil, err
+			}
+			return nil, nil, nil, ErrStateChanged
+		}
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	p.cancel = cancel
 	s.mu.Unlock()
+	admitted = true
 	return ctx, p, func() {
+		defer s.configMu.RUnlock()
 		s.mu.Lock()
 		p.cancel = nil
 		s.mu.Unlock()
@@ -106,10 +140,6 @@ func (s *Service) begin(ctx context.Context, name string, create bool) (context.
 
 func (s *Service) Login(ctx context.Context, req LoginRequest) (Empty, error) {
 	defer clear(req.Password)
-	client, err := bitwarden.NewClient(req.Server, req.Email, uuid.NewString())
-	if err != nil {
-		return Empty{}, err
-	}
 	ctx, p, done, err := s.begin(ctx, req.Profile, true)
 	if err != nil {
 		return Empty{}, err
@@ -125,6 +155,22 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (Empty, error) {
 	}
 	if saved.Deleting {
 		return Empty{}, errors.New("logout incomplete; retry logout")
+	}
+	policy, configured := s.policies[req.Profile]
+	if configured {
+		if req.Server == "" {
+			req.Server = policy.Server
+		}
+		if req.Email == "" {
+			req.Email = policy.Email
+		}
+	}
+	client, err := bitwarden.NewClient(req.Server, req.Email, uuid.NewString())
+	if err != nil {
+		return Empty{}, err
+	}
+	if configured && !client.Matches(&bitwarden.Cache{Server: policy.Server, Email: policy.Email}) {
+		return Empty{}, errors.New("login identity differs from configured profile")
 	}
 	if saved.Cache != nil {
 		if !client.Matches(saved.Cache) {
@@ -170,6 +216,7 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (Empty, error) {
 	}
 	p.clearCatalog()
 	p.session, p.snapshot, p.credential = session, snapshot, saved.Credential
+	s.activateIdle(p, s.policies[req.Profile])
 	p.authVersion++
 	p.needsLogin = false
 	if p.auth != nil && p.auth.id == req.AuthID {
@@ -199,6 +246,9 @@ func (s *Service) Read(ctx context.Context, req ReadRequest) (ReadResponse, erro
 	// shortcut: cap fields at 10 KB for worst-case JSON escaping; add chunked RPC when larger fields are needed.
 	if len(value) > 10000 {
 		return ReadResponse{}, errors.New("field exceeds RPC output limit (10000 bytes)")
+	}
+	if err := s.touch(ctx, p); err != nil {
+		return ReadResponse{}, err
 	}
 	return ReadResponse{Value: value}, nil
 }
@@ -318,6 +368,7 @@ func (s *Service) Unlock(ctx context.Context, req UnlockRequest) (Empty, error) 
 	}
 	p.clearCatalog()
 	p.session, p.snapshot, p.credential = session, snapshot, saved.Credential
+	s.activateIdle(p, s.policies[req.Profile])
 	p.authVersion++
 	if p.auth != nil && p.auth.id == req.AuthID {
 		p.auth.succeeded = true
@@ -352,11 +403,7 @@ func (s *Service) Status(ctx context.Context, req ProfileRequest) (StatusRespons
 func destroy(p *profile) {
 	p.gate <- struct{}{}
 	defer func() { <-p.gate }()
-	if p.session != nil {
-		p.session.Close()
-	}
-	p.clearCatalog()
-	p.session, p.snapshot, p.credential = nil, nil, ""
+	clearMemory(p)
 }
 
 func (s *Service) Lock(ctx context.Context, req ProfileRequest) (Empty, error) {
@@ -386,21 +433,16 @@ func (s *Service) clearProfile(ctx context.Context, name string, logout bool) er
 		}
 		s.profiles[name] = p
 	}
-	// Keep the gate across lock/logout; a replacement must not overtake persistent cleanup.
-	p.epoch++
-	s.finishAuth(p)
-	p.barriers++
-	if p.cancel != nil {
-		p.cancel()
-	}
+	// Keep the gate across lock/logout; a replacement cannot overtake cleanup.
+	s.invalidate(p)
 	s.mu.Unlock()
+	if logout {
+		s.configMu.RLock()
+		defer s.configMu.RUnlock()
+	}
 	p.gate <- struct{}{}
 	defer func() { s.mu.Lock(); p.barriers--; s.mu.Unlock(); <-p.gate }()
-	if p.session != nil {
-		p.session.Close()
-	}
-	p.clearCatalog()
-	p.session, p.snapshot, p.credential = nil, nil, ""
+	clearMemory(p)
 	if !logout {
 		return nil
 	}
@@ -429,6 +471,7 @@ func (s *Service) Shutdown(context.Context) error {
 	profiles := s.profiles
 	s.profiles = nil
 	for _, p := range profiles {
+		s.stopIdle(p)
 		s.finishAuth(p)
 		if p.cancel != nil {
 			p.cancel()

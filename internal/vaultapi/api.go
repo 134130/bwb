@@ -39,6 +39,7 @@ type AuthWatchResponse = vault.AuthWatchResponse
 const AuthTimeout = vault.AuthTimeout
 
 var (
+	Reload    = daemon.NewMethod[Empty, Empty]("vault.reload")
 	List      = daemon.NewMethod[ListRequest, ListResponse]("vault.list")
 	WatchAuth = daemon.NewMethod[AuthEndRequest, AuthWatchResponse]("vault.watchAuth")
 	BeginAuth = daemon.NewMethod[AuthRequest, AuthResponse]("vault.beginAuth")

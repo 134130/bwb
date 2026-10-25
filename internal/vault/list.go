@@ -120,6 +120,9 @@ func (s *Service) List(ctx context.Context, req ListRequest) (ListResponse, erro
 	if err := ctx.Err(); err != nil {
 		return ListResponse{}, err
 	}
+	if err := s.touch(ctx, p); err != nil {
+		return ListResponse{}, err
+	}
 	return response, nil
 }
 

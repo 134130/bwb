@@ -1,6 +1,6 @@
 # bwb 설계
 
-상태: 목표 설계와 구현 계획. Cobra read, daemon/영속 cache, 인증 재개까지 구현했다. 조직 vault/collection 복호화·권한 제한·snapshot 검증도 구현했다. 목록·검색 RPC와 CLI도 구현했다. TUI는 후속이다. 아래 계약에는 미구현 내용이 포함되며 현재 사용법은 README를 따른다.
+상태: 목표 설계와 구현 계획. Cobra read, daemon/영속 cache, 인증 재개까지 구현했다. 조직 vault/collection 복호화·권한 제한·snapshot 검증도 구현했다. 목록·검색 RPC/CLI, config와 profile별 자동 잠금도 구현했다. TUI는 후속이다. 아래 계약에는 미구현 내용이 포함되며 현재 사용법은 README를 따른다.
 
 ## 1. 방향과 첫 범위
 
@@ -124,13 +124,13 @@ bwb daemon stop
 
 ## 5. Profile / config
 
-[예제](../dev/config.example.toml)는 비밀을 포함하지 않는 TOML이다.
+[예제](../dev/config.example.toml)는 비밀을 포함하지 않는 TOML이다. 읽기·검증과 profile list/show를 구현했으며 편집 명령은 후속이다.
 
 - profile = 서버 + 계정 + 해당 인증/cache. folder/collection이나 dev/prod override 집합이 아니다. profile 상속/합성과 프로젝트 config 자동 탐색은 없다.
 - config 경로는 `${XDG_CONFIG_HOME:-$HOME/.config}/bwb/config.toml`. `--config > BWB_CONFIG > 기본 경로` 순서로 한 파일만 읽는다.
 - 이름은 `[a-z][a-z0-9_-]{0,31}`. 알 수 없는 config 키·schema version·잘못된 duration은 거부한다.
 - config는 version/default_profile와 profile별 server/email/lock_timeout만 가진다. token/password/키는 금지한다.
-- `lock_timeout = "0s"`는 명시적 lock 또는 daemon 종료까지 복호화 키를 유지한다. 양수는 마지막 성공한 사용자 비밀 조회부터 계산한다. status, sync, TUI polling은 연장하지 않는다.
+- `lock_timeout = "0s"`는 명시적 lock 또는 daemon 종료까지 복호화 키를 유지한다. 양수는 login/unlock 완료부터 시작하고 성공한 read/list에서 갱신한다. status와 sync는 연장하지 않는다. 후속 TUI의 자동 polling은 사용자 조회와 구분해야 한다.
 - 한 OS 사용자당 daemonkit instance 하나. profile별 storage/secrets namespace를 사용하고 검증된 server URL/account ID를 저장된 identity와 대조한다. config 파일을 바꾸어 같은 이름을 다른 identity에 연결하면 충돌 오류다.
 - server/email이 바뀐 profile은 기존 세션/cache를 재사용하지 않는다. 먼저 기존 identity로 logout하거나 새 profile을 만든다. profile use는 기본 선택만 바꾸며 다른 profile의 상태를 바꾸지 않는다.
 - cloud US/EU는 검증된 API/Identity 주소로 매핑한다. self-hosted는 base URL의 `/api`, `/identity`를 사용한다. 분리 custom endpoint는 후속이다.
@@ -210,3 +210,5 @@ rbw가 모든 refresh 실패를 자동 login으로 회복하거나 모든 secret
 BW_SESSION은 [공식 CLI의 로컬 secure storage 키](https://github.com/bitwarden/clients/blob/main/apps/cli/src/platform/services/node-env-secure-storage.service.ts)이며 API token이 아니다. bwb에서는 이 환경변수를 인증 계약으로 사용하지 않는다.
 
 의존성: Cobra/UUID, 터미널 상태 제어용 `golang.org/x/term`, `github.com/134130/go-daemonkit v0.0.0-20261024090218-d756ef3418d7`, `github.com/awnumar/memguard v0.23.0`. memguard는 직접 OS별 메모리 보호 코드를 만들지 않고 locked memory와 명시적 파기를 사용하기 위한 선택이다. daemonkit Storage와 Secrets를 vault 영속 저장에 사용하며 별도 DB·keychain 구현은 만들지 않는다.
+
+현재 config 적용 계약: TOML은 원하는 설정, SQLite/keychain은 인증·캐시 상태를 소유한다. CLI는 기본 profile 선택과 config/profile 검사에 파일을 읽는다. Daemon은 시작 시 선택한 파일의 profile identity/timeout을 적용하고 `daemon reload`에서 같은 파일 전체를 검증하여 교체한다. 일반 조회는 설정을 적용하지 않는다. Reload 실패 시 기존 정책 유지, 로그인된 profile identity 변경/삭제는 먼저 logout 필요. Logout은 TOML 정의를 삭제하지 않는다. 정책은 DB에 중복 저장하지 않으며 이전 개발 버전의 policy 필드는 무시한다. 설정 교체는 profile 작업과 배타적으로 진행하고, 검증/취소 확인 후에는 caller 취소와 무관하게 메모리 교체를 완료한다. Lock과 idle 만료는 reload 대기 중에도 진행 작업을 취소할 수 있다. 재적용은 마지막 활동 시각을 바꾸지 않는다. Timer generation과 admission deadline 검사로 오래된 타이머와 지연된 만료를 처리한다. 파일 watcher 및 config/profile 편집 명령은 구현하지 않는다.

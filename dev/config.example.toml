@@ -1,4 +1,5 @@
-# Proposed bwb configuration; not executable configuration yet.
+# Apply edits with `bwb daemon reload`; failure keeps the running policy.
+# Copy to ~/.config/bwb/config.toml or select with --config. Contains no secrets.
 version = 1
 default_profile = "local"
 
