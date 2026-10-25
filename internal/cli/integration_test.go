@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/134130/bwb/internal/vaultapi"
 	"github.com/google/uuid"
 	"io"
 	"net/http"
@@ -130,8 +131,81 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	must("", "", "daemon", "update")
 	must("", "unlocked\n", "status")
 	must("", "logged_out\n", "--profile", "other", "status")
+	list := func(kind string, flags ...string) []vaultapi.ListEntry {
+		t.Helper()
+		args := append([]string{kind, "list", "--format", "json"}, flags...)
+		output, err := run("", args...)
+		if err != nil {
+			t.Fatalf("list %v: %v %s", args, err, output)
+		}
+		var result struct {
+			Version int
+			Data    []vaultapi.ListEntry
+		}
+		if err := json.Unmarshal([]byte(output), &result); err != nil || result.Version != 1 || result.Data == nil {
+			t.Fatal("invalid list JSON", err, output)
+		}
+		for _, secret := range []string{manifest.Password, "DEMO-only-password-1!", "DEMO-org-hidden!", "DEMO-org-multi!", "DEMO-0001"} {
+			if strings.Contains(output, secret) {
+				t.Fatal("list leaked secret")
+			}
+		}
+		return result.Data
+	}
 	before := requests.Load()
 	offline.Store(true)
+	all := list("item")
+	expectedIDs := map[string]bool{}
+	for _, id := range manifest.Items {
+		expectedIDs[id] = true
+	}
+	for _, org := range manifest.Organizations.Entries {
+		for _, item := range org.Items {
+			expectedIDs[item.ID] = true
+		}
+	}
+	if len(all) != len(expectedIDs) {
+		t.Fatal("list missing items")
+	}
+	for _, entry := range all {
+		if !expectedIDs[entry.ID] {
+			t.Fatal("unexpected list item")
+		}
+		delete(expectedIDs, entry.ID)
+	}
+	if len(list("organization")) != 2 || len(list("collection")) != 4 || len(list("folder")) != 2 {
+		t.Fatal("discovery metadata missing")
+	}
+	var shared vaultapi.ListEntry
+	for _, entry := range all {
+		if entry.ID == manifest.Organizations.Entries[0].Items[0].ID {
+			shared = entry
+		}
+	}
+	if shared.Organization == nil || shared.Folder == nil || len(shared.Collections) != 2 {
+		t.Fatal("list lost folder/collection relationships")
+	}
+	selected := list("item", "--organization", shared.Organization.ID, "--collection", shared.Collections[0].ID, "--folder", shared.Folder.ID)
+	if len(selected) != 1 || selected[0].ID != shared.ID {
+		t.Fatal("combined filter mismatch")
+	}
+	if len(list("collection", "--organization", shared.Organization.ID)) != 2 {
+		t.Fatal("collection organization filter mismatch")
+	}
+	if len(list("item", "--search", "DEMO shared LOGIN")) != 4 {
+		t.Fatal("case-insensitive search failed")
+	}
+	if len(list("item", "--search", "no-such-item")) != 0 {
+		t.Fatal("empty search failed")
+	}
+	descending := list("item", "--sort", "type,name", "--reverse")
+	if len(descending) != len(all) {
+		t.Fatal("sort lost items")
+	}
+	if output, err := run("", "item", "list", "--group-by", "collection"); err != nil || !strings.Contains(output, "collection: Shared [") || strings.Count(output, shared.ID) != 2 {
+		t.Fatal("grouped table failed", err)
+	}
+
 	for _, tc := range []struct{ fixtureID, path, want string }{
 		{"20000000-0000-4000-8000-000000000001", "login/password", "DEMO-only-password-1!"},
 		{"20000000-0000-4000-8000-000000000005", "login/password", ""},
@@ -210,6 +284,9 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	for _, org := range manifest.Organizations.Entries {
 		must("", "DEMO-org-multi!", "read", org.Items[0].ID, "login/password")
 	}
+	if len(list("item")) != len(all) {
+		t.Fatal("offline restart list failed")
+	}
 	if requests.Load() != before {
 		t.Fatal("offline unlock contacted server")
 	}
@@ -228,6 +305,10 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 			t.Fatal("restricted secret exposed", err)
 		}
 	}
+	restrictedItems := list("item", "--profile", "restricted")
+	if len(restrictedItems) != 6 {
+		t.Fatal("restricted profile list leaked personal items")
+	}
 	must("", "", "--profile", "restricted", "logout")
 	// Exercise the actual controlling terminal; stdout remains a pipe.
 	terminal := func(scenario, want string, args ...string) {
@@ -241,6 +322,7 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 		}
 	}
 	must("", "", "lock")
+	terminal("no_prompt", "", "--non-interactive", "item", "list")
 	terminal("no_prompt", "", "--non-interactive", "read", id, "login/password")
 	for _, scenario := range []string{"wrong", "long", "cancel", "signal", "lock", "cancel_waiters"} {
 		terminal(scenario, "", "read", id, "login/password")
@@ -249,6 +331,13 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	offline.Store(true)
 	before = requests.Load()
 	terminal("concurrent", "DEMO-only-password-1!", "read", id, "login/password")
+	listOutput, err := run("", "item", "list", "--format", "json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	must("", "", "lock")
+	terminal("success", listOutput, "item", "list", "--format", "json")
+
 	if requests.Load() != before {
 		t.Fatal("automatic unlock contacted server")
 	}

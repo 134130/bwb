@@ -13,6 +13,8 @@ import (
 )
 
 type profile struct {
+	catalog      bitwarden.Catalog
+	catalogID    string
 	gate         chan struct{}
 	epoch        uint64
 	barriers     int
@@ -166,6 +168,7 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (Empty, error) {
 	if p.session != nil {
 		p.session.Close()
 	}
+	p.clearCatalog()
 	p.session, p.snapshot, p.credential = session, snapshot, saved.Credential
 	p.authVersion++
 	p.needsLogin = false
@@ -267,6 +270,7 @@ func (s *Service) Sync(ctx context.Context, req ProfileRequest) (Empty, error) {
 	if err := ctx.Err(); err != nil {
 		return Empty{}, err
 	}
+	p.clearCatalog()
 	p.snapshot = snapshot
 	return Empty{}, nil
 }
@@ -312,6 +316,7 @@ func (s *Service) Unlock(ctx context.Context, req UnlockRequest) (Empty, error) 
 	if p.session != nil {
 		p.session.Close()
 	}
+	p.clearCatalog()
 	p.session, p.snapshot, p.credential = session, snapshot, saved.Credential
 	p.authVersion++
 	if p.auth != nil && p.auth.id == req.AuthID {
@@ -350,6 +355,7 @@ func destroy(p *profile) {
 	if p.session != nil {
 		p.session.Close()
 	}
+	p.clearCatalog()
 	p.session, p.snapshot, p.credential = nil, nil, ""
 }
 
@@ -393,6 +399,7 @@ func (s *Service) clearProfile(ctx context.Context, name string, logout bool) er
 	if p.session != nil {
 		p.session.Close()
 	}
+	p.clearCatalog()
 	p.session, p.snapshot, p.credential = nil, nil, ""
 	if !logout {
 		return nil

@@ -18,7 +18,7 @@ type executor struct {
 	prompt passwordPrompt
 }
 
-// Only Read and Sync opt into authentication recovery. Output happens after this returns.
+// Read, List and Sync opt into authentication recovery. Output happens after this returns.
 func (e executor) Read(ctx context.Context, req vaultapi.ReadRequest) (vaultapi.ReadResponse, error) {
 	return execute(ctx, func() (vaultapi.ReadResponse, error) { return e.client.Invoke(ctx, vaultapi.Read, req) },
 		func(err error) error { return e.authenticate(ctx, req.Profile, err) })
@@ -110,4 +110,26 @@ func (e executor) authenticate(ctx context.Context, profile string, failure erro
 		_, err = e.client.Invoke(authCtx, vaultapi.Login, vaultapi.LoginRequest{Profile: profile, Server: reservation.Server, Email: reservation.Email, Password: password, AuthID: reservation.ID})
 	}
 	return err
+}
+
+// List buffers all pages before output; authentication retries restart the whole query.
+func (e executor) List(ctx context.Context, req vaultapi.ListRequest) ([]vaultapi.ListEntry, error) {
+	return execute(ctx, func() ([]vaultapi.ListEntry, error) {
+		entries := []vaultapi.ListEntry{}
+		pageReq := req
+		for {
+			response, err := e.client.Invoke(ctx, vaultapi.List, pageReq)
+			if err != nil {
+				return nil, err
+			}
+			entries = append(entries, response.Entries...)
+			if response.NextCursor == "" {
+				return entries, nil
+			}
+			if response.NextCursor == pageReq.Cursor {
+				return nil, errors.New("list cursor did not advance")
+			}
+			pageReq.Cursor = response.NextCursor
+		}
+	}, func(err error) error { return e.authenticate(ctx, req.Profile, err) })
 }

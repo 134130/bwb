@@ -18,7 +18,7 @@ import (
 )
 
 func NewRoot() *cobra.Command {
-	root := &cobra.Command{Use: "bwb", Short: "Read Bitwarden vault fields through a local daemon", SilenceUsage: true, SilenceErrors: true}
+	root := &cobra.Command{Use: "bwb", Short: "Browse and read Bitwarden vaults through a local daemon", SilenceUsage: true, SilenceErrors: true}
 	var profile string
 	var nonInteractive bool
 	root.PersistentFlags().BoolVar(&nonInteractive, "non-interactive", false, "Never prompt for authentication")
@@ -171,6 +171,9 @@ func NewRoot() *cobra.Command {
 		}
 		return manager.Update(cmd.Context(), executable)
 	}})
+	for _, kind := range []string{"item", "folder", "organization", "collection"} {
+		root.AddCommand(listCommand(kind, &profile, &nonInteractive))
+	}
 	root.AddCommand(login, unlock, logout, read, sync, lock, status, control)
 	return root
 }

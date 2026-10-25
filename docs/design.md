@@ -1,6 +1,6 @@
 # bwb 설계
 
-상태: 목표 설계와 구현 계획. Cobra read, daemon/영속 cache, 인증 재개까지 구현했다. 조직 vault/collection 복호화·권한 제한·snapshot 검증도 구현했다. 목록·검색은 후속이다. 아래 계약에는 미구현 내용이 포함되며 현재 사용법은 README를 따른다.
+상태: 목표 설계와 구현 계획. Cobra read, daemon/영속 cache, 인증 재개까지 구현했다. 조직 vault/collection 복호화·권한 제한·snapshot 검증도 구현했다. 목록·검색 RPC와 CLI도 구현했다. TUI는 후속이다. 아래 계약에는 미구현 내용이 포함되며 현재 사용법은 README를 따른다.
 
 ## 1. 방향과 첫 범위
 
@@ -108,7 +108,7 @@ bwb daemon stop
 - profile은 계정 경계다. 계정 안에서 item은 개인 소유 또는 한 organization 소유이며, 개인 정리용 folder는 0~1개, 조직 collection은 0~여러 개다. folder와 collection은 별도 관계이며 상호 배타적인 분류로 합치지 않는다.
 - item 조회 모델은 `organizationId`, `folderId`, `collectionIds`를 보존한다. organization/collection은 ID로 식별하고 collection에 organization ID를 둔다. 동명 collection을 합치거나 이름의 `/`를 실제 부모 관계로 추론하지 않는다.
 - `bwb organization list`, `bwb collection list --organization ID`, `bwb folder list`로 탐색한다. `item list`에는 `--organization ID`, `--collection ID`, `--folder ID` 필터를 두며 서로 다른 필터는 AND다. 잘못된 ID와 서로 맞지 않는 조직/collection 선택은 입력 오류다. 이름을 ID 대신 조용히 해석하지 않는다.
-- 기본 목록은 item당 한 행이며 조직·folder·collection 소속을 표시한다. JSON은 ID 관계를 유지하는 평면 배열을 data에 담는다. `--group-by collection`은 다중 소속 item을 각 그룹에 표시하고 미소속 그룹도 둔다. 그룹 때문에 전체 고유 item 수가 늘어난 것으로 보고하지 않는다.
+- 기본 목록은 item당 한 행이며 조직·folder·collection 소속을 표시한다. JSON은 ID 관계를 유지하는 평면 배열을 data에 담는다. 목록의 organization/folder는 `{id,name}`, collections는 같은 구조의 배열이며 backend item 모델의 ID 관계를 보존한다. `--group-by collection`은 다중 소속 item을 각 그룹에 표시하고 미소속 그룹도 둔다. 그룹 때문에 전체 고유 item 수가 늘어난 것으로 보고하지 않는다.
 - 정렬은 `--sort name|type|folder|organization`의 쉼표 조합과 `--reverse`를 지원할 계획이다. 기본은 name, 동률은 ID로 고정한다. 여러 값을 가진 collection의 정렬은 첫 범위에서 제외한다. 표의 열 너비·다중 소속 표현은 실제 snapshot으로 확인한 뒤 확정한다.
 
 선행 구현과 검증:
@@ -120,7 +120,7 @@ bwb daemon stop
 5. 재현 가능한 SQL snapshot에 두 조직, 조직 간 동명 collection, 다중 collection 소속, folder와 collection 동시 소속, 개인·조직 동명 item, 제한 권한 계정을 추가한다. 공개 합성 키와 manifest 기대값을 함께 관리한다. 기존 8종 coverage는 유지하고 조직 키/item key 경로는 대표 항목으로 검증한다.
 6. 실제 API 기반 read, 재시작 후 offline unlock/read, profile·조직 키 격리, lock과 조회 경합, sync 후 권한 회수·삭제를 integration에서 검증한다. 비동기 경합 단위 테스트는 synctest를 사용한다. Lefthook의 두 번 독립 snapshot 복원 검증에 포함한다.
 
-현재 조직 키와 item key 복호화, 조직 metadata/collection의 암호화 cache 보존, 서버의 viewPassword 제한, 두 조직·네 collection snapshot 검증을 구현했다. 제한 항목은 우선 이름만 읽도록 보수적으로 처리한다. 조직 키는 작업 중에만 보호 메모리에 두며 파싱된 RSA private key의 Go 임시 할당은 즉시 zeroize를 보장하지 않는다. 다음으로 목록·검색 RPC와 표현을 추가한다. 조직/collection 생성·수정, 초대·멤버 관리 API는 이번 범위가 아니다.
+현재 조직 키와 item key 복호화, 조직 metadata/collection의 암호화 cache 보존, 서버의 viewPassword 제한, 두 조직·네 collection snapshot 검증을 구현했다. 제한 항목은 우선 이름만 읽도록 보수적으로 처리한다. 조직 키는 작업 중에만 보호 메모리에 두며 파싱된 RSA private key의 Go 임시 할당은 즉시 zeroize를 보장하지 않는다. 목록·검색 RPC와 표/JSON 표현, 정렬·필터·그룹 표시도 구현했다. 조직/collection 생성·수정, 초대·멤버 관리 API는 이번 범위가 아니다.
 
 ## 5. Profile / config
 
@@ -164,7 +164,7 @@ CLI / TUI ─ typed local RPC ─ vault service
 - 최초 cache 준비와 명시적 sync에서만 네트워크를 사용한다. 자동 background sync는 첫 범위에서 제외하고 last_sync와 오프라인 상태를 보여준다.
 - sync는 profile당 하나. 새 암호문 snapshot/키 metadata/last_sync를 SQLite transaction으로 함께 교체한다. 구조·identity 검증 실패 시 이전 snapshot을 보존한다. locked 상태의 sync는 암호학적 복호화 검증까지 완료했다고 주장하지 않는다.
 - unlocked sync는 새 snapshot으로 임시 index를 만든 뒤 publish한다. 키 변경이나 복호화 실패 시 이전 index를 새 snapshot과 섞지 않고 vault를 잠근다. 잠긴 sync에서 저장된 암호문은 다음 unlock 때 MAC/복호화를 검증한다.
-- list/search는 unlock 때 만든 최소 index를 사용한다. 상세는 필요한 항목을 메모리의 암호문 snapshot에서 복호화한다. cache-only 조회는 HTTP와 subprocess 0회가 기준이다.
+- list/search는 unlock 이후 첫 목록 요청에서 만든 이름·소속 metadata index를 재사용한다. 원문 비밀 필드는 복호화하거나 index에 담지 않는다. 성공한 login/unlock/sync와 lock/logout/shutdown에서 index 참조를 폐기한다. 상세는 필요한 항목을 메모리의 암호문 snapshot에서 복호화한다. cache-only 조회는 HTTP와 subprocess 0회가 기준이다.
 - RPC 메시지 64 KiB에 맞춰 목록은 byte budget으로 페이지 처리한다. page cursor는 snapshot generation에 묶고 변경 시 재시작을 요구한다. 한도를 넘는 단일 값은 명시적 오류이며 비밀을 잘라 성공 처리하지 않는다.
 - TUI는 profile/auth/vault 상태·last_sync, 검색 목록, 상세, 일시적 reveal, lock/sync/quit를 제공한다. profile/item/focus 변경과 lock에서 reveal을 지운다. TUI 종료는 daemon lock과 다르다.
 - 키보드 조작, 색상 외 상태 표시, 작은 화면/Unicode/긴 값 처리를 지원한다. clipboard는 후속이다.
@@ -189,7 +189,7 @@ CLI / TUI ─ typed local RPC ─ vault service
 - DB/config/log/argv에 plaintext 비밀번호·복호화 키·token·vault 값 없음. refresh token은 OS credential store에만 존재. logout 뒤 cache/credential 접근 불가.
 - 중복 이름, 빈 값, Unicode, 여러 줄 notes, hidden field, card/identity 기본 마스킹, RPC 크기 초과.
 
-현재 Go API의 login/refresh/sync/8종 복호화와 Cobra → daemon RPC를 snapshot 서버에서 검증한다. profile별 키·토큰은 memguard locked memory, snapshot은 암호문으로 메모리에 유지한다. read는 HTTP 없이 동작하며 lock/shutdown은 진행 중 작업을 취소하고 세션을 파기한다. 임시 crypto/HTTP/RPC 평문 복사본까지 완전히 zeroize하지는 않는다. `main.go`는 root, 패키지는 `cli`, `vaultapi`, `daemon`, `vault`, `bitwarden`으로 나눈다. keychain refresh token과 SQLite 암호화 cache 저장, HTTP 없는 unlock, 로컬 logout을 구현했다. `lock`은 메모리만 파기하고 재시작 후 비밀번호로 unlock한다. SQLite/keychain 간 작업은 credential 정리 목록으로 복구하며, logout 실패 시 표시를 저장하고 unlock을 막는다. CLI 공통 실행부의 인증 후 원래 read/sync 1회 재시도까지 구현했다. 서비스의 AuthRequired/ErrStateChanged는 daemon에서 RPC 코드로 바꾸며 일반 장애는 그대로 전달한다. 자동 인증 예약은 연결 감시·취소·lock 및 2분 만료로 정리하고, 대기자는 prompt를 중복 생성하지 않는다. TUI·Argon2id·2FA는 후속이다. 테스트는 전용 서버·계정만 사용한다.
+현재 Go API의 login/refresh/sync/8종 복호화와 Cobra → daemon RPC를 snapshot 서버에서 검증한다. profile별 키·토큰은 memguard locked memory, snapshot은 암호문으로 메모리에 유지한다. read는 HTTP 없이 동작하며 lock/shutdown은 진행 중 작업을 취소하고 세션을 파기한다. 임시 crypto/HTTP/RPC 평문 복사본까지 완전히 zeroize하지는 않는다. `main.go`는 root, 패키지는 `cli`, `vaultapi`, `daemon`, `vault`, `bitwarden`으로 나눈다. keychain refresh token과 SQLite 암호화 cache 저장, HTTP 없는 unlock, 로컬 logout을 구현했다. `lock`은 메모리만 파기하고 재시작 후 비밀번호로 unlock한다. SQLite/keychain 간 작업은 credential 정리 목록으로 복구하며, logout 실패 시 표시를 저장하고 unlock을 막는다. CLI 공통 실행부의 인증 후 원래 read/list/sync 1회 재시도까지 구현했다. 서비스의 AuthRequired/ErrStateChanged는 daemon에서 RPC 코드로 바꾸며 일반 장애는 그대로 전달한다. 자동 인증 예약은 연결 감시·취소·lock 및 2분 만료로 정리하고, 대기자는 prompt를 중복 생성하지 않는다. TUI·Argon2id·2FA는 후속이다. 테스트는 전용 서버·계정만 사용한다.
 
 ## 9. 참고한 인터페이스와 근거
 

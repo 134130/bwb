@@ -6,6 +6,11 @@ import (
 	daemon "github.com/134130/go-daemonkit"
 )
 
+type ListRequest = vault.ListRequest
+type ListResponse = vault.ListResponse
+type ListEntry = vault.ListEntry
+type NamedID = vault.NamedID
+
 type ProfileRequest = vault.ProfileRequest
 type LoginRequest = vault.LoginRequest
 type UnlockRequest = vault.UnlockRequest
@@ -34,6 +39,7 @@ type AuthWatchResponse = vault.AuthWatchResponse
 const AuthTimeout = vault.AuthTimeout
 
 var (
+	List      = daemon.NewMethod[ListRequest, ListResponse]("vault.list")
 	WatchAuth = daemon.NewMethod[AuthEndRequest, AuthWatchResponse]("vault.watchAuth")
 	BeginAuth = daemon.NewMethod[AuthRequest, AuthResponse]("vault.beginAuth")
 	EndAuth   = daemon.NewMethod[AuthEndRequest, Empty]("vault.endAuth")

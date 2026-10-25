@@ -61,6 +61,9 @@ func Run(ctx context.Context) error {
 	if err := app.Handle(vaultapi.Login, rpcHandler(service.Login)); err != nil {
 		return err
 	}
+	if err := app.Handle(vaultapi.List, rpcHandler(service.List)); err != nil {
+		return err
+	}
 	if err := app.Handle(vaultapi.Read, rpcHandler(service.Read)); err != nil {
 		return err
 	}

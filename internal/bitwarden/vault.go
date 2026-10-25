@@ -1,6 +1,7 @@
 package bitwarden
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -253,21 +254,15 @@ func decryptItem(raw []byte, userKey []byte) (Item, error) {
 	if item.Reprompt != 0 {
 		return Item{}, ErrUnsupported
 	}
-	if itemKey != nil {
-		key, err := decrypt(*itemKey, userKey)
-		if err != nil {
-			return Item{}, err
-		}
-		defer clear(key)
-		if len(key) != 64 {
-			return Item{}, ErrCipher
-		}
-		userKey = key
+	key, err := decryptItemKey(itemKey, userKey)
+	if err != nil {
+		return Item{}, err
 	}
+	defer clear(key)
+	userKey = key
 	if json.Unmarshal(envelope[payload], &item.Data) != nil || item.Data == nil {
 		return Item{}, errors.New("missing item payload")
 	}
-	var err error
 	item.Name, err = decryptText(item.Name, userKey)
 	if err != nil {
 		return Item{}, err
@@ -416,4 +411,19 @@ func (s *Session) Read(snapshot *Snapshot, id, path string) (string, error) {
 		return "", err
 	}
 	return (&Vault{Items: []Item{item}}).Read(id, path)
+}
+
+func decryptItemKey(encrypted *string, ownerKey []byte) ([]byte, error) {
+	if encrypted == nil {
+		return bytes.Clone(ownerKey), nil
+	}
+	key, err := decrypt(*encrypted, ownerKey)
+	if err != nil {
+		return nil, err
+	}
+	if len(key) != 64 {
+		clear(key)
+		return nil, ErrCipher
+	}
+	return key, nil
 }

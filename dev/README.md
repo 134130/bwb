@@ -27,6 +27,7 @@ runner는 SHA-256 검사 → SQLite 복원·무결성 검사 → digest로 고�
 - 서버 UUID, folder 관계, enum/boolean/null/빈 값/Unicode/여러 줄 값 유지.
 - fixture/dump checksum 일치, SQL 무결성·foreign key 검사.
 - Go 제품 코드의 암호문 변조·잘못된 키·padding 오류 거부, 독립 Python KDF/cipher vector 대조, 기대 필드 누락/값 변경 감지.
+- 실제 목록 RPC/CLI의 19개 항목·조직·folder·collection 발견, AND 필터·검색·정렬·그룹 표시, 비밀 필드 비노출, 제한 profile 격리, 재시작 후 HTTP 없는 목록과 TTY 자동 unlock. Byte-budget pagination과 stale cursor 거부, 제어문자 escape, lock의 index 폐기는 단위 검사로 검증한다.
 - 실제 바이너리의 daemon 자동 기동, 별도 CLI 프로세스의 비밀번호/빈 값/여러 줄 출력, offline read 시 HTTP 0회, 실패한 sync/재로그인 후 cache 유지.
 - profile identity 변경 거부, 진행 중 login의 lock 취소, lock 후 조회 거부, 종료·재시작 후 오프라인 unlock과 HTTP 0회.
 - 실제 OS keychain에 저장한 refresh token으로 재시작 후 sync, 반복 재시작, logout 후 unlock 거부·다른 profile 유지.
