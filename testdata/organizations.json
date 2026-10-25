@@ -1,0 +1,12 @@
+{
+  "restricted_email": "bwb-restricted@example.invalid",
+  "organizations": [
+    {"name": "DEMO Engineering", "collections": ["Shared", "Operations"]},
+    {"name": "DEMO Research", "collections": ["Shared", "Operations"]}
+  ],
+  "items": [
+    {"name": "DEMO shared login", "password": "DEMO-org-multi!", "collections": [0, 1], "item_key": true, "folder": true},
+    {"name": "DEMO shared login", "password": "DEMO-org-hidden!", "collections": [0], "item_key": false, "folder": false},
+    {"name": "DEMO read-only login", "password": "DEMO-org-readable!", "collections": [1], "item_key": false, "folder": false}
+  ]
+}

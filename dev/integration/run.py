@@ -18,7 +18,8 @@ import urllib.parse
 import urllib.request
 import uuid
 
-from cryptography.hazmat.primitives import hashes, padding
+from cryptography.hazmat.primitives import hashes, padding, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa, padding as asymmetric_padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDFExpand
 
@@ -41,11 +42,11 @@ def b64(value):
     return base64.b64encode(value).decode()
 
 
-def master_keys():
-    master = hashlib.pbkdf2_hmac('sha256', PASSWORD.encode(), EMAIL.encode(), ITERATIONS)
+def master_keys(email=EMAIL, password=PASSWORD):
+    master = hashlib.pbkdf2_hmac('sha256', password.encode(), email.encode(), ITERATIONS)
     stretched = b''.join(HKDFExpand(algorithm=hashes.SHA256(), length=32, info=info).derive(master)
                          for info in (b'enc', b'mac'))
-    password_hash = b64(hashlib.pbkdf2_hmac('sha256', master, PASSWORD.encode(), 1))
+    password_hash = b64(hashlib.pbkdf2_hmac('sha256', master, password.encode(), 1))
     return stretched, password_hash
 
 
@@ -136,10 +137,10 @@ class Server:
             raw = response.read()
             return json.loads(raw) if raw else None
 
-    def login(self, password_hash=None):
+    def login(self, password_hash=None, email=EMAIL):
         return self.request('POST', '/identity/connect/token', {
             'grant_type': 'password', 'client_id': 'web', 'scope': 'api offline_access',
-            'username': EMAIL, 'password': password_hash or master_keys()[1],
+            'username': email, 'password': password_hash or master_keys(email)[1],
             'deviceType': 8, 'deviceIdentifier': '30000000-0000-4000-8000-000000000001',
             'deviceName': 'bwb-integration'}, form=True)
 
@@ -172,10 +173,109 @@ def seed(server):
             payload[field] = transform(item[field], lambda s: encrypt(s.encode(), user_key))
         result = server.request('POST', '/api/ciphers', payload, token)
         items[item['id']] = result['id']
-    return {'version': 1, 'image': IMAGE, 'email': EMAIL, 'password': PASSWORD,
+    organizations = seed_organizations(server, token, user_key, account_id, folders)
+    return {'organizations': organizations, 'version': 1, 'image': IMAGE, 'email': EMAIL, 'password': PASSWORD,
             'kdf': {'type': 0, 'iterations': ITERATIONS}, 'account_id': account_id,
             'folders': folders, 'items': items,
             'types': {str(k): v for k, v in TYPES.items()}}
+
+
+def rsa_envelope(key, public):
+    return '4.' + b64(public.encrypt(key, asymmetric_padding.OAEP(
+        mgf=asymmetric_padding.MGF1(hashes.SHA1()), algorithm=hashes.SHA1(), label=None)))
+
+
+def account_rsa(user_key):
+    private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    return private, {
+        'encryptedPrivateKey': encrypt(private.private_bytes(serialization.Encoding.DER,
+            serialization.PrivateFormat.PKCS8, serialization.NoEncryption()), user_key),
+        'publicKey': b64(private.public_key().public_bytes(serialization.Encoding.DER,
+            serialization.PublicFormat.SubjectPublicKeyInfo))}
+
+
+def seed_organizations(server, token, user_key, account_id, folders):
+    data = json.loads((ROOT / 'testdata/organizations.json').read_text())
+    private, keys = account_rsa(user_key)
+    server.request('POST', '/api/accounts/keys', keys, token)
+    email = data['restricted_email']
+    restricted_key = os.urandom(64)
+    restricted_private, restricted_keys = account_rsa(restricted_key)
+    verification = server.request('POST', '/identity/accounts/register/send-verification-email', {'email': email})
+    master, password_hash = master_keys(email)
+    server.request('POST', '/identity/accounts/register/finish', {
+        'emailVerificationToken': verification, 'email': email, 'masterPasswordHash': password_hash,
+        'key': encrypt(restricted_key, master), 'kdf': 0, 'kdfIterations': ITERATIONS, 'keys': restricted_keys})
+    entries = []
+    for expected in data['organizations']:
+        key = os.urandom(64)
+        org = server.request('POST', '/api/organizations', {
+            'billingEmail': EMAIL, 'collectionName': encrypt(expected['collections'][0].encode(), key),
+            'key': rsa_envelope(key, private.public_key()), 'name': expected['name'], 'planType': 0}, token)
+        oid = org['id']
+        synced = server.request('GET', '/api/sync', token=token)
+        first = next(c['id'] for c in synced['collections'] if c['organizationId'] == oid)
+        collections = [first]
+        for name in expected['collections'][1:]:
+            created = server.request('POST', f'/api/organizations/{oid}/collections', {
+                'name': encrypt(name.encode(), key), 'groups': [], 'users': []}, token)
+            collections.append(created['id'])
+        members = [{'id': cid, 'readOnly': True, 'hidePasswords': n == 0, 'manage': False}
+                   for n, cid in enumerate(collections)]
+        server.request('POST', f'/api/organizations/{oid}/users/invite', {
+            'emails': [email], 'groups': [], 'type': 2, 'collections': members}, token)
+        users = server.request('GET', f'/api/organizations/{oid}/users', token=token)['data']
+        member = next(u['id'] for u in users if u['email'] == email)
+        server.request('POST', f'/api/organizations/{oid}/users/{member}/confirm', {
+            'key': rsa_envelope(key, restricted_private.public_key())}, token)
+        items = []
+        for item in data['items']:
+            item_key = os.urandom(64) if item['item_key'] else key
+            cids = [collections[i] for i in item['collections']]
+            folder = next(iter(folders.values())) if item['folder'] else None
+            payload = {'type': 1, 'organizationId': oid, 'encryptedFor': account_id,
+                'folderId': folder, 'name': encrypt(item['name'].encode(), item_key),
+                'notes': encrypt(b'DEMO organizational note', item_key), 'fields': [], 'reprompt': 0,
+                'login': {'username': encrypt(b'demo-user', item_key),
+                          'password': encrypt(item['password'].encode(), item_key)},
+                'key': encrypt(item_key, key) if item['item_key'] else None}
+            result = server.request('POST', '/api/ciphers/create', {'cipher': payload, 'collectionIds': cids}, token)
+            items.append({'id': result['id'], 'collection_ids': cids, 'folder_id': folder})
+        entries.append({'id': oid, 'collections': collections, 'items': items, 'restricted_member': member})
+    return {'restricted_email': email, 'entries': entries}
+
+
+def verify_organizations(server, manifest, owner_sync, owner_key):
+    data = json.loads((ROOT / 'testdata/organizations.json').read_text())
+    restricted = server.login(email=data['restricted_email'])
+    restricted_key = decrypt(restricted['Key'], master_keys(data['restricted_email'])[0])
+    restricted_sync = server.request('GET', '/api/sync', token=restricted['access_token'])
+    for sync, user_key, limited in [(owner_sync, owner_key, False), (restricted_sync, restricted_key, True)]:
+        private = serialization.load_der_private_key(decrypt(sync['profile']['privateKey'], user_key), None)
+        orgs = {o['id']: o for o in sync['profile']['organizations']}
+        require(len(orgs) == len(data['organizations']) and
+                len(sync['collections']) == sum(len(o['collections']) for o in data['organizations']),
+                'organization/collection count mismatch')
+        actual = {i['id']: i for i in sync['ciphers']}
+        for expected, entry in zip(data['organizations'], manifest['organizations']['entries']):
+            org = orgs[entry['id']]
+            require(org['name'] == expected['name'], 'organization name mismatch')
+            key = private.decrypt(base64.b64decode(org['key'][2:]), asymmetric_padding.OAEP(
+                mgf=asymmetric_padding.MGF1(hashes.SHA1()), algorithm=hashes.SHA1(), label=None))
+            for cid, name in zip(entry['collections'], expected['collections']):
+                collection = next(c for c in sync['collections'] if c['id'] == cid)
+                require(collection['organizationId'] == entry['id'] and decrypt(collection['name'], key).decode() == name,
+                        'collection relationship/name mismatch')
+            for expected_item, item_entry in zip(data['items'], entry['items']):
+                item = actual[item_entry['id']]
+                item_key = decrypt(item['key'], key) if item['key'] else key
+                require(set(item['collectionIds']) == set(item_entry['collection_ids']), 'collection membership mismatch')
+                require(item['organizationId'] == entry['id'], 'item organization mismatch')
+                require(item['folderId'] == (None if limited else item_entry['folder_id']), 'personal folder mismatch')
+                require(decrypt(item['login']['password'], item_key).decode() == expected_item['password'], 'organization item key mismatch')
+                require(item['viewPassword'] == (not limited or expected_item['collections'] != [0]), 'effective permissions mismatch')
+                if limited:
+                    require(item['edit'] is False, 'read-only restriction lost')
 
 
 def verify(server, manifest):
@@ -197,7 +297,7 @@ def verify(server, manifest):
     require(sync['profile']['id'] == manifest['account_id'], 'account changed')
     data = fixture()
     actual = {x['id']: x for x in sync['ciphers']}
-    require(set(actual) == set(manifest['items'].values()), 'item IDs/count changed')
+    require(set(actual) == set(manifest['items'].values()) | {i['id'] for o in manifest['organizations']['entries'] for i in o['items']}, 'item IDs/count changed')
     require({x['type'] for x in actual.values()} == set(TYPES), 'missing cipher type')
     folders = {x['id']: decrypt(x['name'], key).decode() for x in sync['folders']}
     require(folders == {manifest['folders'][x['id']]: x['name'] for x in data['folders']},
@@ -211,6 +311,7 @@ def verify(server, manifest):
             got = transform(item[field], lambda s: decrypt(s, key).decode())
             # Server may add optional null/default fields; all fixture fields must survive.
             compare(expected[field], got, f'{expected["id"]}/{field}')
+    verify_organizations(server, manifest, sync, key)
     print(f'PASS: real login, bad password, refresh, sync, decrypt; {len(actual)} items; types 1–8')
 
 
@@ -244,6 +345,7 @@ def main():
             dump.write_text(sql)
             manifest['dump_sha256'] = digest(dump)
             manifest['fixture_sha256'] = digest(ROOT / 'testdata/bitwarden.json')
+            manifest['organizations_sha256'] = digest(ROOT / 'testdata/organizations.json')
             (SNAPSHOT / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
             print('Snapshot rebuilt. Run again without --rebuild to verify restoration.')
         else:
@@ -252,12 +354,15 @@ def main():
             require(manifest['dump_sha256'] == digest(SNAPSHOT / 'vaultwarden.sql'), 'dump checksum mismatch')
             require(manifest['fixture_sha256'] == digest(ROOT / 'testdata/bitwarden.json'),
                     'fixture changed: rebuild and review snapshot')
+            require(manifest['organizations_sha256'] == digest(ROOT / 'testdata/organizations.json'), 'organization fixture changed: rebuild snapshot')
             with sqlite3.connect(db_path) as db:
                 db.executescript((SNAPSHOT / 'vaultwarden.sql').read_text())
                 require(db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok', 'corrupt snapshot')
             with Server(directory) as server:
+                verify(server, manifest)
                 subprocess.run(
-                    ['go', 'test', '-tags=integration', '-count=1', '-v',
+                    # Packages share a server; membership mutation tests restore before CLI tests.
+                    ['go', 'test', '-p=1', '-tags=integration', '-count=1', '-v',
                      './internal/bitwarden', './internal/cli'],
                     cwd=ROOT, env={**os.environ, 'BWB_INTEGRATION_URL': server.url}, check=True)
 

@@ -33,15 +33,18 @@ type Field struct {
 }
 
 type Item struct {
-	ID             string  `json:"id"`
-	Type           int     `json:"type"`
-	OrganizationID *string `json:"organizationId"`
-	FolderID       *string `json:"folderId"`
-	Name           string  `json:"name"`
-	Notes          *string `json:"notes"`
-	Favorite       bool    `json:"favorite"`
-	Reprompt       int     `json:"reprompt"`
-	Fields         []Field `json:"fields"`
+	ID             string   `json:"id"`
+	Type           int      `json:"type"`
+	OrganizationID *string  `json:"organizationId"`
+	CollectionIDs  []string `json:"collectionIds"`
+	ViewPassword   *bool    `json:"viewPassword,omitempty"`
+	Edit           *bool    `json:"edit,omitempty"`
+	FolderID       *string  `json:"folderId"`
+	Name           string   `json:"name"`
+	Notes          *string  `json:"notes"`
+	Favorite       bool     `json:"favorite"`
+	Reprompt       int      `json:"reprompt"`
+	Fields         []Field  `json:"fields"`
 	// Data contains the selected type's payload. Only known encrypted fields are decrypted.
 	Data map[string]any `json:"data"`
 }
@@ -51,20 +54,24 @@ type Folder struct {
 	Name string `json:"name"`
 }
 type Profile struct {
-	ID    string `json:"id"`
-	Email string `json:"email"`
-	Key   string `json:"key"`
+	ID            string         `json:"id"`
+	Email         string         `json:"email"`
+	Key           string         `json:"key"`
+	PrivateKey    string         `json:"privateKey,omitempty"`
+	Organizations []Organization `json:"organizations,omitempty"`
 }
 type Vault struct {
-	Profile Profile
-	Folders []Folder
-	Items   []Item
+	Profile     Profile
+	Folders     []Folder
+	Collections []Collection
+	Items       []Item
 }
 
 type syncResponse struct {
-	Profile Profile           `json:"profile"`
-	Folders []Folder          `json:"folders"`
-	Ciphers []json.RawMessage `json:"ciphers"`
+	Profile     Profile           `json:"profile"`
+	Folders     []Folder          `json:"folders"`
+	Ciphers     []json.RawMessage `json:"ciphers"`
+	Collections []Collection      `json:"collections,omitempty"`
 }
 
 func validID(value string) bool {
@@ -136,7 +143,16 @@ func (s *Session) validateSnapshot(ctx context.Context, response syncResponse) (
 }
 
 func (s *Session) decryptSnapshot(ctx context.Context, response syncResponse) (*Vault, error) {
-	vault := &Vault{Profile: response.Profile, Folders: make([]Folder, 0, len(response.Folders)), Items: make([]Item, 0, len(response.Ciphers))}
+	keys, err := s.organizationKeys(ctx, response.Profile)
+	if err != nil {
+		return nil, err
+	}
+	defer keys.close()
+	collections, err := decryptCollections(response.Collections, keys)
+	if err != nil {
+		return nil, err
+	}
+	vault := &Vault{Collections: collections, Profile: response.Profile, Folders: make([]Folder, 0, len(response.Folders)), Items: make([]Item, 0, len(response.Ciphers))}
 	folders := make(map[string]bool)
 	for _, folder := range response.Folders {
 		if !validID(folder.ID) || folders[folder.ID] {
@@ -154,8 +170,11 @@ func (s *Session) decryptSnapshot(ctx context.Context, response syncResponse) (*
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		item, err := decryptItem(raw, s.key.Bytes())
+		item, err := s.decryptOwnedItem(raw, keys)
 		if err != nil {
+			return nil, err
+		}
+		if err := validateCollections(item, collections); err != nil {
 			return nil, err
 		}
 		if ids[item.ID] {
@@ -223,16 +242,27 @@ func decryptItem(raw []byte, userKey []byte) (Item, error) {
 		return Item{}, errors.New("invalid item ID")
 	}
 	payload, supported := payloadNames[item.Type]
-	if !supported || item.OrganizationID != nil {
+	if !supported {
 		return Item{}, ErrUnsupported
 	}
-	// Item keys and reprompt require additional key/policy handling, not user-key fallback.
+	// Reprompt requires a separate authorization flow.
 	var itemKey *string
 	if json.Unmarshal(envelope["key"], &itemKey) != nil && envelope["key"] != nil {
 		return Item{}, errors.New("invalid item key")
 	}
-	if itemKey != nil || item.Reprompt != 0 {
+	if item.Reprompt != 0 {
 		return Item{}, ErrUnsupported
+	}
+	if itemKey != nil {
+		key, err := decrypt(*itemKey, userKey)
+		if err != nil {
+			return Item{}, err
+		}
+		defer clear(key)
+		if len(key) != 64 {
+			return Item{}, ErrCipher
+		}
+		userKey = key
 	}
 	if json.Unmarshal(envelope[payload], &item.Data) != nil || item.Data == nil {
 		return Item{}, errors.New("missing item payload")
@@ -295,6 +325,10 @@ func (v *Vault) Read(id, path string) (string, error) {
 		if item.ID != id {
 			continue
 		}
+		// shortcut: restricted items expose only their name until field-level policy parity is verified.
+		if item.ViewPassword != nil && !*item.ViewPassword && path != "name" {
+			return "", ErrPermission
+		}
 		switch path {
 		case "name":
 			return item.Name, nil
@@ -355,7 +389,29 @@ func (s *Session) Read(snapshot *Snapshot, id, path string) (string, error) {
 	if !ok {
 		return "", ErrNotFound
 	}
-	item, err := decryptItem(raw, s.key.Bytes())
+	// Resolve only the requested item's organization; personal reads do no RSA work.
+	var envelope struct {
+		OrganizationID *string `json:"organizationId"`
+	}
+	if json.Unmarshal(raw, &envelope) != nil {
+		return "", errors.New("invalid item")
+	}
+	profile := snapshot.profile
+	profile.Organizations = nil
+	if envelope.OrganizationID != nil {
+		for _, org := range snapshot.profile.Organizations {
+			if org.ID == *envelope.OrganizationID {
+				profile.Organizations = []Organization{org}
+				break
+			}
+		}
+	}
+	keys, err := s.organizationKeys(context.Background(), profile)
+	if err != nil {
+		return "", err
+	}
+	defer keys.close()
+	item, err := s.decryptOwnedItem(raw, keys)
 	if err != nil {
 		return "", err
 	}

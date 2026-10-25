@@ -44,6 +44,13 @@ class ContractTest(unittest.TestCase):
         self.assertEqual(manifest['types'], {str(k): v for k, v in run.TYPES.items()})
         self.assertEqual(manifest['fixture_sha256'], run.digest(run.ROOT / 'testdata/bitwarden.json'))
         self.assertEqual(manifest['dump_sha256'], run.digest(run.SNAPSHOT / 'vaultwarden.sql'))
+        self.assertEqual(manifest['organizations_sha256'], run.digest(run.ROOT / 'testdata/organizations.json'))
+        organizations = json.loads((run.ROOT / 'testdata/organizations.json').read_text())
+        self.assertGreaterEqual(len(organizations['organizations']), 2)
+        self.assertTrue(all(len(o['collections']) >= 2 for o in organizations['organizations']))
+        self.assertEqual(len(manifest['organizations']['entries']), len(organizations['organizations']))
+        org_items = {i['id'] for o in manifest['organizations']['entries'] for i in o['items']}
+        self.assertEqual(len(org_items), len(organizations['organizations'])*len(organizations['items']))
         data = run.fixture()
         self.assertEqual(set(manifest['items']), {x['id'] for x in data['items']})
         self.assertEqual(set(manifest['folders']), {x['id'] for x in data['folders']})
@@ -51,8 +58,11 @@ class ContractTest(unittest.TestCase):
             db.executescript((run.SNAPSHOT / 'vaultwarden.sql').read_text())
             self.assertEqual(db.execute('PRAGMA integrity_check').fetchone()[0], 'ok')
             self.assertEqual(db.execute('PRAGMA foreign_key_check').fetchall(), [])
-            self.assertEqual(db.execute('SELECT count(*) FROM users').fetchone()[0], 1)
-            self.assertEqual(db.execute('SELECT count(*) FROM ciphers').fetchone()[0], len(data['items']))
+            self.assertEqual(db.execute('SELECT count(*) FROM users').fetchone()[0], 2)
+            self.assertEqual(db.execute('SELECT count(*) FROM ciphers').fetchone()[0], len(data['items']) + len(org_items))
+            self.assertEqual(db.execute('SELECT count(*) FROM organizations').fetchone()[0], len(organizations['organizations']))
+            self.assertEqual(db.execute('SELECT count(*) FROM collections').fetchone()[0],
+                             sum(len(o['collections']) for o in organizations['organizations']))
 
 
 if __name__ == '__main__':

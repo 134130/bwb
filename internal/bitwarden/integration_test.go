@@ -23,6 +23,7 @@ func TestSnapshotIntegration(t *testing.T) {
 		Email, Password string
 		AccountID       string `json:"account_id"`
 		Items, Folders  map[string]string
+		Organizations   organizationManifest
 	}
 	loadJSON(t, "../../testdata/integration/manifest.json", &manifest)
 	var fixture struct {
@@ -56,7 +57,11 @@ func TestSnapshotIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if vault.Profile.ID != manifest.AccountID || len(vault.Items) != len(fixture.Items) {
+	itemCount := len(fixture.Items)
+	for _, org := range manifest.Organizations.Entries {
+		itemCount += len(org.Items)
+	}
+	if vault.Profile.ID != manifest.AccountID || len(vault.Items) != itemCount {
 		t.Fatal("snapshot identity/count mismatch")
 	}
 	gotFolders := map[string]string{}

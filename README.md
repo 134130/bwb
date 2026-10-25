@@ -11,7 +11,7 @@ Bitwarden를 CLI와 TUI로 사용하는 Go 클라이언트. 현재는 Cobra CLI 
 풀린 키는 daemon 메모리, refresh token은 OS credential store, 암호화된 vault는 로컬 SQLite에 보관한다.
 BW_SESSION이나 bw/rbw 실행 파일에 의존하지 않는다. 세부 설계와 구현 순서는 위 문서를 참고한다.
 
-필수 [integration snapshot](testdata/integration/README.md)은 8종·13개 항목을 포함한다. `dev/integration/run.py`가 전용 서버에 복원해 실제 API를 검사하고, Lefthook pre-commit이 매 커밋마다 실행한다. 실행 준비는 개발 가이드를 따른다.
+필수 [integration snapshot](testdata/integration/README.md)은 8종·19개 항목을 포함한다. `dev/integration/run.py`가 전용 서버에 복원해 실제 API를 검사하고, Lefthook pre-commit이 매 커밋마다 실행한다. 실행 준비는 개발 가이드를 따른다.
 
 ## 현재 실행 범위
 
@@ -60,7 +60,7 @@ main.go → internal/cli (Cobra + 인증 실행부)
 
 키와 access/refresh token의 장기 보관은 `memguard` locked memory를 사용한다. 평문 snapshot은 보관하지 않는다. crypto·HTTP·JSON·RPC 처리 중 임시 Go 문자열/버퍼는 생기며 모든 복사본의 즉시 zeroize를 보장하지 않는다. 메모리 보호 실패 시 평문 fallback은 없다. 같은 OS 사용자 프로세스는 daemon 접근 가능하다. daemonkit SQLite에는 암호화 vault와 계정 metadata만 기록하며 비밀번호·token은 넣지 않는다. cache record는 512 KiB 단위로 원자적으로 저장하며 최대 64 MiB다. Unix 경로는 `XDG_STATE_HOME`, 실행·keychain namespace는 `BWB_INSTANCE`로 격리한다. 테스트는 둘 모두 독립 값으로 설정한다.
 
-지원 범위는 PBKDF2(100000–2000000 iterations), 개인 vault, AES-CBC/HMAC `2.` 암호문, 8종의 기본 필드다. Argon2id, 2FA/SSO, 조직 vault, item별 key, reprompt, passkey는 아직 지원하지 않는다. 공식 Bitwarden 서버와의 상호운용성은 별도 검증이 필요하다.
+지원 범위는 PBKDF2(100000–2000000 iterations), 개인·조직 vault, AES-CBC/HMAC `2.` 암호문, 8종의 기본 필드다. Argon2id, 2FA/SSO, reprompt, passkey는 아직 지원하지 않는다. 공식 Bitwarden 서버와의 상호운용성은 별도 검증이 필요하다.
 
 ```sh
 go test ./...
@@ -68,3 +68,5 @@ mise run integration
 ```
 
 integration은 실제 Vaultwarden에서 Go API 코드와 빌드된 CLI·daemon을 실행해 snapshot 기대값, profile 격리, offline read/unlock의 HTTP 0회, lock 중 로그인 취소, 재시작 후 keychain refresh, logout 영속성을 검사한다. 실제 PTY로 비밀 비노출·취소·동시 prompt 억제·자동 재로그인도 확인한다. Python은 서버 복원과 snapshot 생성에만 쓰며 제품의 암호화 구현은 Go 표준 라이브러리를 사용한다.
+
+조직 vault는 RSA-OAEP SHA-1/SHA-256(`4.`/`3.`)으로 감싼 조직 키와 선택적 item key를 지원한다. 조직·collection 소속과 권한은 암호화 cache에 보존하며 재시작 후 offline unlock/read가 가능하다. 조직 키는 작업 중 보호 메모리에서 사용한 뒤 파기하고, RSA private key 파싱 중 Go 임시 할당의 즉시 zeroize는 보장하지 않는다. `viewPassword=false` 항목은 현재 이름만 읽을 수 있고 나머지 필드는 명시적 제한 오류다. Collection 권한을 합산하지 않고 서버가 계산한 항목 권한을 사용한다. 이 제한은 클라이언트 정책이며 서버가 암호문·키를 제공하는 사용자의 다른 프로그램까지 막는 보안 경계는 아니다. 조직/collection 관리·목록 명령은 아직 없다.

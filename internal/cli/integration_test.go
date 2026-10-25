@@ -33,6 +33,10 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	var manifest struct {
 		Email, Password string
 		Items           map[string]string
+		Organizations   struct {
+			RestrictedEmail string `json:"restricted_email"`
+			Entries         []struct{ Items []struct{ ID string } }
+		}
 	}
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		t.Fatal(err)
@@ -107,7 +111,7 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 		}
 	}
 	defer func() {
-		for _, profile := range []string{"default", "other"} {
+		for _, profile := range []string{"default", "other", "restricted"} {
 			if output, err := run("", "--profile", profile, "logout"); err != nil {
 				t.Errorf("credential cleanup: %v %s", err, output)
 			}
@@ -134,6 +138,9 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 		{"20000000-0000-4000-8000-000000000006", "notes", "DEMO-0001\nDEMO-0002\n"},
 	} {
 		must("", tc.want, "read", manifest.Items[tc.fixtureID], tc.path)
+	}
+	for _, org := range manifest.Organizations.Entries {
+		must("", "DEMO-org-multi!", "read", org.Items[0].ID, "login/password")
 	}
 	if requests.Load() != before {
 		t.Fatal("cached reads made HTTP requests")
@@ -167,6 +174,11 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 		t.Fatal("login did not reach sync")
 	}
 	must("", "", "lock")
+	for _, org := range manifest.Organizations.Entries {
+		if output, err := run("", "read", org.Items[0].ID, "login/password"); err == nil || strings.Contains(output, "DEMO-org-multi!") {
+			t.Fatal("organization read survived lock", err)
+		}
+	}
 	select {
 	case err := <-loginDone:
 		if err == nil {
@@ -195,6 +207,9 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	must("", "locked\n", "status")
 	must(manifest.Password+"\n", "", "unlock", "--password-stdin")
 	must("", "DEMO-only-password-1!", "read", id, "login/password")
+	for _, org := range manifest.Organizations.Entries {
+		must("", "DEMO-org-multi!", "read", org.Items[0].ID, "login/password")
+	}
 	if requests.Load() != before {
 		t.Fatal("offline unlock contacted server")
 	}
@@ -206,6 +221,14 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	if requests.Load() < before+2 {
 		t.Fatal("restart did not refresh using persisted token")
 	}
+	must(manifest.Password+"\n", "", "--profile", "restricted", "login", "--server", endpoint.URL, "--email", manifest.Organizations.RestrictedEmail, "--password-stdin")
+	for _, org := range manifest.Organizations.Entries {
+		must("", "DEMO-org-multi!", "--profile", "restricted", "read", org.Items[0].ID, "login/password")
+		if output, err := run("", "--profile", "restricted", "read", org.Items[1].ID, "login/password"); err == nil || !strings.Contains(output, "restricted") || strings.Contains(output, "DEMO-org-hidden!") {
+			t.Fatal("restricted secret exposed", err)
+		}
+	}
+	must("", "", "--profile", "restricted", "logout")
 	// Exercise the actual controlling terminal; stdout remains a pipe.
 	terminal := func(scenario, want string, args ...string) {
 		t.Helper()

@@ -1,6 +1,6 @@
 # bwb 설계
 
-상태: 목표 설계. 첫 구현은 Cobra read + Go API/PBKDF2 복호화와 실제 snapshot integration까지다. 아래 daemon/profile/TUI 계약은 아직 미구현이며 현재 사용법은 README를 따른다.
+상태: 목표 설계와 구현 계획. Cobra read, daemon/영속 cache, 인증 재개까지 구현했다. 조직 vault/collection 복호화·권한 제한·snapshot 검증도 구현했다. 목록·검색은 후속이다. 아래 계약에는 미구현 내용이 포함되며 현재 사용법은 README를 따른다.
 
 ## 1. 방향과 첫 범위
 
@@ -8,7 +8,7 @@ CLI와 TUI가 go-daemonkit 기반 daemon을 공유하고, daemon이 Bitwarden Pa
 
 핵심은 **서버 로그인과 로컬 vault unlock의 분리**다. 명령은 필요한 상태만 확보하고 이어서 실행한다. 반복 조회는 네트워크와 외부 프로세스 실행 없이 처리한다.
 
-첫 범위는 macOS/Linux, 개인 vault, 자체 로그인/로그아웃, unlock/lock, sync, 목록/상세/필드 조회, 읽기 전용 TUI다. master-password 로그인과 PBKDF2/Argon2id, TOTP 2FA를 첫 검증 대상으로 한다. 조직 vault, SSO/WebAuthn, 편집, attachments, SSH agent, 환경 주입은 후속이다. 지원하지 않는 인증·키·암호문 형식은 명시적 오류로 처리한다.
+첫 범위는 macOS/Linux, 개인·조직 vault 읽기, 자체 로그인/로그아웃, unlock/lock, sync, 목록/상세/필드 조회, 읽기 전용 TUI다. master-password 로그인과 PBKDF2/Argon2id, TOTP 2FA를 검증 대상으로 한다. 조직 vault/collection 읽기는 목록 구현의 선행 작업이다. SSO/WebAuthn, 조직·collection 관리, 편집, attachments, SSH agent, 환경 주입은 후속이다. 지원하지 않는 인증·키·암호문 형식은 명시적 오류로 처리한다.
 
 Full integration은 실제 서버의 인증·동기화·복호화·조회·재인증을 통과하는 것이다. 버전 관리된 필수 SQL dump snapshot을 매번 독립 서버에 복원하고 Lefthook pre-commit에서 매 커밋마다 검증한다. 수동/선택적 import와 HTTP mock만으로 완료를 선언하지 않는다.
 
@@ -103,6 +103,25 @@ bwb daemon stop
 - 종료 코드: 0 성공, 1 backend/내부 실패, 2 입력/config 오류, 3 인증 필요/실패, 4 item/field 없음, 5 모호한 선택, 130 취소. RPC 오류 코드는 CLI에서 매핑한다.
 - logout은 선택 profile의 로컬 cache만 삭제한다. 원격 vault item은 삭제하지 않는다. 복수 profile 전체 logout/purge는 첫 범위에서 제외한다.
 
+### 조직·folder·collection 계약 (목록 구현 전 확정)
+
+- profile은 계정 경계다. 계정 안에서 item은 개인 소유 또는 한 organization 소유이며, 개인 정리용 folder는 0~1개, 조직 collection은 0~여러 개다. folder와 collection은 별도 관계이며 상호 배타적인 분류로 합치지 않는다.
+- item 조회 모델은 `organizationId`, `folderId`, `collectionIds`를 보존한다. organization/collection은 ID로 식별하고 collection에 organization ID를 둔다. 동명 collection을 합치거나 이름의 `/`를 실제 부모 관계로 추론하지 않는다.
+- `bwb organization list`, `bwb collection list --organization ID`, `bwb folder list`로 탐색한다. `item list`에는 `--organization ID`, `--collection ID`, `--folder ID` 필터를 두며 서로 다른 필터는 AND다. 잘못된 ID와 서로 맞지 않는 조직/collection 선택은 입력 오류다. 이름을 ID 대신 조용히 해석하지 않는다.
+- 기본 목록은 item당 한 행이며 조직·folder·collection 소속을 표시한다. JSON은 ID 관계를 유지하는 평면 배열을 data에 담는다. `--group-by collection`은 다중 소속 item을 각 그룹에 표시하고 미소속 그룹도 둔다. 그룹 때문에 전체 고유 item 수가 늘어난 것으로 보고하지 않는다.
+- 정렬은 `--sort name|type|folder|organization`의 쉼표 조합과 `--reverse`를 지원할 계획이다. 기본은 name, 동률은 ID로 고정한다. 여러 값을 가진 collection의 정렬은 첫 범위에서 제외한다. 표의 열 너비·다중 소속 표현은 실제 snapshot으로 확인한 뒤 확정한다.
+
+선행 구현과 검증:
+
+1. 실제 sync 응답과 upstream 구현에서 암호화된 사용자 private key → organization key → 선택적 item key 경로, collection 이름 암호화, 항목별 유효 권한 필드를 확인한다. 사용자 키 fallback으로 조직 항목을 복호화하지 않는다. 기존 `internal/bitwarden`이 키 선택·프로토콜 검증을 소유한다.
+2. 암호화 snapshot에 조직·collection·보호된 키를 함께 보존한다. plaintext 키는 보호 메모리에만 두고 lock/logout에서 파기한다. 기존 개인 cache의 offline unlock 호환성을 유지하며, 불완전한 조직 cache를 빈 조직 목록으로 간주하지 않는다. 포맷 변경이 필요하면 version과 호환 정책을 명시한다.
+3. 서버가 내려준 접근 범위와 유효 제한을 서비스 조회에 적용한다. collection별 권한을 임의로 합산하지 않는다. read-only는 읽기를 막는 권한이 아니며, hide-password 등의 제한은 명시적 read에도 적용한다. 지원하지 못하는 제한은 우회하지 않고 명시적 오류로 처리한다. CLI/TUI에만 제한을 두지 않는다.
+4. sync 성공 시 항목·조직·collection·키 metadata를 같은 generation으로 교체한다. 삭제·탈퇴·권한 변경은 성공한 sync 후 반영한다. offline cache는 마지막 sync의 권한 상태이며 원격 회수를 즉시 알 수 없다. 손상된 키/관계 때문에 실패한 sync는 기존 cache를 유지하고 실패를 알린다.
+5. 재현 가능한 SQL snapshot에 두 조직, 조직 간 동명 collection, 다중 collection 소속, folder와 collection 동시 소속, 개인·조직 동명 item, 제한 권한 계정을 추가한다. 공개 합성 키와 manifest 기대값을 함께 관리한다. 기존 8종 coverage는 유지하고 조직 키/item key 경로는 대표 항목으로 검증한다.
+6. 실제 API 기반 read, 재시작 후 offline unlock/read, profile·조직 키 격리, lock과 조회 경합, sync 후 권한 회수·삭제를 integration에서 검증한다. 비동기 경합 단위 테스트는 synctest를 사용한다. Lefthook의 두 번 독립 snapshot 복원 검증에 포함한다.
+
+현재 조직 키와 item key 복호화, 조직 metadata/collection의 암호화 cache 보존, 서버의 viewPassword 제한, 두 조직·네 collection snapshot 검증을 구현했다. 제한 항목은 우선 이름만 읽도록 보수적으로 처리한다. 조직 키는 작업 중에만 보호 메모리에 두며 파싱된 RSA private key의 Go 임시 할당은 즉시 zeroize를 보장하지 않는다. 다음으로 목록·검색 RPC와 표현을 추가한다. 조직/collection 생성·수정, 초대·멤버 관리 API는 이번 범위가 아니다.
+
 ## 5. Profile / config
 
 [예제](../dev/config.example.toml)는 비밀을 포함하지 않는 TOML이다.
@@ -152,12 +171,14 @@ CLI / TUI ─ typed local RPC ─ vault service
 
 ## 8. Full integration과 구현 순서
 
-[개발 환경](../dev/README.md)은 로컬 Vaultwarden를 사용한다. 공식 Bitwarden와의 호환성은 별도 실제 서버에서 검증한다. [SQL snapshot과 manifest](../testdata/integration/README.md)를 반드시 복원한다. [합성 데이터](../testdata/bitwarden.json)는 암호문 seed의 원본이자 복호화 기대값이며 API 응답을 대신하지 않는다. 서버 8종 타입은 현재 13개 항목으로 검증하고 새 타입/필드는 fixture와 dump를 함께 갱신한다.
+[개발 환경](../dev/README.md)은 로컬 Vaultwarden를 사용한다. 공식 Bitwarden와의 호환성은 별도 실제 서버에서 검증한다. [SQL snapshot과 manifest](../testdata/integration/README.md)를 반드시 복원한다. [합성 데이터](../testdata/bitwarden.json)는 암호문 seed의 원본이자 복호화 기대값이며 API 응답을 대신하지 않는다. 서버 8종 타입은 현재 19개 항목으로 검증하고 새 타입/필드는 fixture와 dump를 함께 갱신한다.
 
 1. **직접 API 수직 구현**: 전용 계정 login → 실제 sync → 키 복호화 → 항목 read. PBKDF2/Argon2id와 변조/잘못된 키를 검증한다. crypto 단위 테스트는 공식 vector와 대조한다.
 2. **daemon과 저장 수명**: CLI를 연결하고 profile 격리, keychain token, transaction cache, lock/unlock/logout, 재시작 후 오프라인 unlock을 검증한다.
 3. **인증 재개**: token 만료→refresh, refresh 무효→login→원래 읽기 재개, 2FA/취소/비TTY/동시 요청/연결 끊김을 검증한다.
-4. **TUI**: 같은 RPC로 CLI와 동일 값·마스킹·잠금 상태를 확인한다.
+4. **조직 vault/collection**: 조직·item 키와 유효 읽기 권한, 암호화 cache, 확장 snapshot을 검증한다. 목록의 선행 작업이다.
+5. **목록·검색**: 개인·조직 항목을 함께 조회하고 정렬, folder/collection 필터·그룹 표시, HTTP 없는 조회를 검증한다.
+6. **TUI**: 같은 RPC로 CLI와 동일 값·마스킹·잠금 상태를 확인한다.
 
 추가 acceptance:
 

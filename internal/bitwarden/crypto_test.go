@@ -84,8 +84,6 @@ func encryptPadded(t *testing.T, padded, key []byte) string {
 func TestUnsupportedItemPolicies(t *testing.T) {
 	for _, raw := range []string{
 		`{"id":"20000000-0000-4000-8000-000000000001","type":9}`,
-		`{"id":"20000000-0000-4000-8000-000000000001","type":1,"organizationId":"org"}`,
-		`{"id":"20000000-0000-4000-8000-000000000001","type":1,"key":"item-key"}`,
 		`{"id":"20000000-0000-4000-8000-000000000001","type":1,"reprompt":1}`,
 	} {
 		if _, err := decryptItem([]byte(raw), make([]byte, 64)); !errors.Is(err, ErrUnsupported) {

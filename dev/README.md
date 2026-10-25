@@ -22,7 +22,8 @@ runner는 SHA-256 검사 → SQLite 복원·무결성 검사 → digest로 고�
 ## 현재 검증 범위
 
 - Go 제품 코드의 실제 prelogin, 잘못된 비밀번호 거부, 로그인, 명시적 refresh와 401 후 자동 refresh, sync.
-- protected user key 복호화 후 8종·13개 항목의 필드를 평문 기대값과 비교.
+- protected user key 복호화 후 8종·19개 항목의 필드를 평문 기대값과 비교.
+- 조직 2개 × collection 2개, 다중 소속·동명 collection, folder 동시 소속, RSA 조직 키·item key, 읽기 전용/숨김 제한 계정, 실제 권한 회수 후 sync 반영.
 - 서버 UUID, folder 관계, enum/boolean/null/빈 값/Unicode/여러 줄 값 유지.
 - fixture/dump checksum 일치, SQL 무결성·foreign key 검사.
 - Go 제품 코드의 암호문 변조·잘못된 키·padding 오류 거부, 독립 Python KDF/cipher vector 대조, 기대 필드 누락/값 변경 감지.
@@ -36,11 +37,11 @@ runner는 SHA-256 검사 → SQLite 복원·무결성 검사 → digest로 고�
 
 Python runner는 복원된 서버의 URL을 테스트 자식 프로세스에 전달하고 `go test -tags=integration -count=1`을 실행한다. integration 태그 없이 `go test ./...`를 실행하면 Docker 없는 단위 검사만 실행한다. integration 태그가 있는데 서버 URL이 없으면 skip하지 않고 실패한다.
 
-Python crypto helper는 snapshot 재생성/재생성 결과 검사에만 남겨둔다. 일반 integration은 Go 코드로 검증한다. CLI 테스트는 임시 state 경로와 고유 `BWB_INSTANCE`에 daemon을 실행한다. 정상 종료 시 각 profile을 logout해 전용 keychain 항목을 지우고 daemon/state를 정리한다. 강제 종료 시 해당 instance의 `logout`으로 남은 credential 정리 목록을 처리할 수 있다. 키·토큰은 memguard로 보관하며 명시적 파기는 단위 테스트로 검사한다. TUI·Argon2id·2FA·조직/item별 키·첨부파일은 후속이다. 현재 offline read는 살아 있는 세션이나 저장된 cache를 비밀번호로 unlock한 뒤 지원한다. 네이티브 keychain 경로는 실제 integration으로 검사한다. 장애 복구 단위 테스트와 서버 앞 proxy의 refresh 거부/연결 장애만 의도적으로 실패를 주입하며 로그인·sync·암호문은 실제 서버를 사용한다. `terminal.py`는 실제 바이너리의 TTY 동작을 검증하는 테스트 도구다.
+Python crypto helper는 snapshot 생성과 복원된 데이터의 독립 교차 검증에 사용한다. Go 제품 API와 CLI integration도 매번 실행한다. 공유 서버의 권한 변경 테스트 때문에 패키지는 `-p=1`로 순차 실행하고, 서로 다른 runner 실행은 독립 서버를 사용한다. CLI 테스트는 임시 state 경로와 고유 `BWB_INSTANCE`에 daemon을 실행한다. 정상 종료 시 각 profile을 logout해 전용 keychain 항목을 지우고 daemon/state를 정리한다. 강제 종료 시 해당 instance의 `logout`으로 남은 credential 정리 목록을 처리할 수 있다. 키·토큰은 memguard로 보관하며 명시적 파기는 단위 테스트로 검사한다. TUI·Argon2id·2FA·첨부파일은 후속이다. 현재 offline read는 살아 있는 세션이나 저장된 cache를 비밀번호로 unlock한 뒤 지원한다. 네이티브 keychain 경로는 실제 integration으로 검사한다. 장애 복구 단위 테스트와 서버 앞 proxy의 refresh 거부/연결 장애만 의도적으로 실패를 주입하며 로그인·sync·암호문은 실제 서버를 사용한다. `terminal.py`는 실제 바이너리의 TTY 동작을 검증하는 테스트 도구다.
 
 ## 데이터 / 타입 추가
 
-1. `testdata/bitwarden.json`에 합성 기대값과 고유 fixture ID를 추가/수정한다. 실계정 dump나 실제 비밀은 사용하지 않는다.
+1. 개인 타입은 `testdata/bitwarden.json`, 조직·collection 사례는 `testdata/organizations.json`에 합성 기대값과 고유 fixture ID를 추가/수정한다. 실계정 dump나 실제 비밀은 사용하지 않는다.
 2. 새 cipher type이면 `dev/integration/run.py`의 `TYPES`, `internal/bitwarden/vault.go`의 payload/암호화 필드 목록, fixture 구조 검사를 함께 갱신한다. 새로운 필드가 암호문인지 enum인지 공식 스키마를 확인한다. 현재 문자열 필드를 암호화하는 규칙에 맞지 않는 타입은 해당 payload 변환을 명시적으로 추가한다.
 3. 전용 임시 서버에서 API로 계정·암호문 데이터를 생성해 snapshot을 갱신한다:
 
@@ -48,8 +49,8 @@ Python crypto helper는 snapshot 재생성/재생성 결과 검사에만 남겨�
    .dev/venv/bin/python dev/integration/run.py --rebuild
    ```
 
-4. `bitwarden.json`, SQL dump, manifest를 함께 리뷰한다. 기존 타입을 제거하거나 실패 케이스를 건너뛰어 테스트를 통과시키지 않는다. snapshot 포맷/서버 버전 변경은 migration 호환성을 확인하고 manifest version을 갱신한다.
-5. 일반 integration을 두 번 실행해 각 fresh restore가 통과하는지 확인한다. 단위 검사도 실행한 뒤 세 파일을 함께 커밋한다.
+4. `bitwarden.json`, `organizations.json`, SQL dump, manifest를 함께 리뷰한다. 기존 타입을 제거하거나 실패 케이스를 건너뛰어 테스트를 통과시키지 않는다. snapshot 포맷/서버 버전 변경은 migration 호환성을 확인하고 manifest version을 갱신한다.
+5. 일반 integration을 두 번 실행해 각 fresh restore가 통과하는지 확인한다. 단위 검사도 실행한 뒤 fixture·dump·manifest를 함께 커밋한다.
 
 fixture를 바꾸고 snapshot 재생성을 잊으면 checksum 검사에서 실패한다. normal test는 기준 dump를 수정하지 않는다. 재생성은 안전한 난수 키/IV와 서버 UUID/시간을 사용하므로 byte-identical하지 않지만, 커밋된 dump의 매번 복원은 같은 계정·ID·값을 보장한다.
 
