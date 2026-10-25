@@ -26,11 +26,13 @@ runner는 SHA-256 검사 → SQLite 복원·무결성 검사 → digest로 고�
 - 서버 UUID, folder 관계, enum/boolean/null/빈 값/Unicode/여러 줄 값 유지.
 - fixture/dump checksum 일치, SQL 무결성·foreign key 검사.
 - Go 제품 코드의 암호문 변조·잘못된 키·padding 오류 거부, 독립 Python KDF/cipher vector 대조, 기대 필드 누락/값 변경 감지.
-- Cobra read의 정확한 비밀번호/빈 값/여러 줄 출력, 입력 제한, API redirect 차단·응답 크기·KDF 비용 상한.
+- 실제 바이너리의 daemon 자동 기동, 별도 CLI 프로세스의 비밀번호/빈 값/여러 줄 출력, offline read 시 HTTP 0회, 실패한 sync/재로그인 후 cache 유지.
+- profile 격리, 진행 중 login의 lock 취소, lock 후 조회 거부, 종료·재시작 후 잠금, 재로그인.
+- 입력 제한, API redirect 차단·응답 크기·KDF 비용 상한, synctest 기반 작업 취소와 shutdown 검증.
 
 Python runner는 복원된 서버의 URL을 테스트 자식 프로세스에 전달하고 `go test -tags=integration -count=1`을 실행한다. integration 태그 없이 `go test ./...`를 실행하면 Docker 없는 단위 검사만 실행한다. integration 태그가 있는데 서버 URL이 없으면 skip하지 않고 실패한다.
 
-Python crypto helper는 snapshot 재생성/재생성 결과 검사에만 남겨둔다. 일반 integration은 Go 코드로 검증한다. daemon/TUI·keychain·잠금 메모리·Argon2id·2FA·조직/item별 키·첨부파일·오프라인 수명은 아직 미구현/미검증이다. 현재 read는 호출마다 로그인하므로 daemon의 warm 조회 성능을 의미하지 않는다.
+Python crypto helper는 snapshot 재생성/재생성 결과 검사에만 남겨둔다. 일반 integration은 Go 코드로 검증한다. CLI 테스트는 임시 state 경로에 daemon을 실행하고 종료·정리한다. 키·토큰은 memguard로 보관하며 명시적 파기는 단위 테스트로 검사한다. TUI·keychain·디스크 cache·Argon2id·2FA·조직/item별 키·첨부파일은 후속이다. 현재 offline read는 살아 있는 daemon 세션에서만 지원한다.
 
 ## 데이터 / 타입 추가
 

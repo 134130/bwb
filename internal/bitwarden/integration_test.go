@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/awnumar/memguard"
 	"os"
 	"reflect"
 	"testing"
@@ -48,7 +49,8 @@ func TestSnapshotIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Exercise automatic refresh on a real unauthorized API response as well.
-	session.access = "invalid-test-access-token"
+	session.access.Destroy()
+	session.access = memguard.NewBufferFromBytes([]byte("invalid-test-access-token"))
 	vault, err := session.Sync(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -102,7 +104,7 @@ func TestSnapshotIntegration(t *testing.T) {
 	}
 	// A real server ciphertext must not yield any plaintext after tampering.
 	var encrypted syncResponse
-	if err := c.request(ctx, "GET", c.api+"/sync", nil, false, session.access, &encrypted); err != nil {
+	if err := c.request(ctx, "GET", c.api+"/sync", nil, false, string(session.access.Bytes()), &encrypted); err != nil {
 		t.Fatal(err)
 	}
 	var entry map[string]any
@@ -111,7 +113,7 @@ func TestSnapshotIntegration(t *testing.T) {
 	}
 	entry["name"] = "2.invalid|cipher|mac"
 	tampered, _ := json.Marshal(entry)
-	if _, err := decryptItem(tampered, session.key); err == nil {
+	if _, err := decryptItem(tampered, session.key.Bytes()); err == nil {
 		t.Fatal("tampered server ciphertext accepted")
 	}
 	session.Close()

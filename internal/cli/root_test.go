@@ -20,8 +20,9 @@ func TestHelpAndInputErrors(t *testing.T) {
 	}
 	for _, args := range [][]string{
 		{"read"},
-		{"read", "bad", "login/password", "--server", "https://example.invalid", "--email", "user@example.invalid", "--password-stdin"},
-		{"read", "20000000-0000-4000-8000-000000000001", "login/password", "--server", "https://example.invalid", "--email", "user@example.invalid"},
+		{"read", "bad", "login/password"},
+		{"login"},
+		{"login", "--server", "https://example.invalid", "--email", "user@example.invalid"},
 	} {
 		root := NewRoot()
 		var out bytes.Buffer
@@ -43,7 +44,7 @@ func TestPasswordInputBounded(t *testing.T) {
 		root.SetIn(strings.NewReader(input))
 		root.SetOut(&bytes.Buffer{})
 		root.SetErr(&bytes.Buffer{})
-		root.SetArgs([]string{"read", "20000000-0000-4000-8000-000000000001", "login/password", "--server", "http://127.0.0.1:1", "--email", "user@example.invalid", "--password-stdin"})
+		root.SetArgs([]string{"login", "--server", "http://127.0.0.1:1", "--email", "user@example.invalid", "--password-stdin"})
 		err := root.Execute()
 		if err == nil || !strings.Contains(err.Error(), "password") {
 			t.Fatal("invalid password input reached network", err)
@@ -62,7 +63,7 @@ func TestPasswordInputCancellation(t *testing.T) {
 		root.SetIn(reader)
 		root.SetOut(&bytes.Buffer{})
 		root.SetErr(&bytes.Buffer{})
-		root.SetArgs([]string{"read", "20000000-0000-4000-8000-000000000001", "login/password", "--server", "http://127.0.0.1:1", "--email", "user@example.invalid", "--password-stdin"})
+		root.SetArgs([]string{"login", "--server", "http://127.0.0.1:1", "--email", "user@example.invalid", "--password-stdin"})
 		result := make(chan error, 1)
 		go func() { result <- root.ExecuteContext(ctx) }()
 		if _, err := writer.Write([]byte("partial password")); err != nil {

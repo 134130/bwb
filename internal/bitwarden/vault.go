@@ -72,31 +72,60 @@ func validID(value string) bool {
 	return err == nil && id != uuid.Nil && id.String() == value
 }
 
+// Snapshot holds only server ciphertext and metadata; reads never contact the server.
+type Snapshot struct {
+	profile Profile
+	items   map[string]json.RawMessage
+}
+
 func (s *Session) Sync(ctx context.Context) (*Vault, error) {
-	if len(s.key) == 0 {
-		return nil, ErrAuthentication
+	_, vault, err := s.sync(ctx)
+	return vault, err
+}
+
+func (s *Session) SyncSnapshot(ctx context.Context) (*Snapshot, error) {
+	snapshot, _, err := s.sync(ctx)
+	return snapshot, err
+}
+
+func (s *Session) sync(ctx context.Context) (*Snapshot, *Vault, error) {
+	if !s.active() {
+		return nil, nil, ErrAuthentication
 	}
 	var response syncResponse
-	err := s.client.request(ctx, "GET", s.client.api+"/sync", nil, false, s.access, &response)
+	err := s.client.request(ctx, "GET", s.client.api+"/sync", nil, false, string(s.access.Bytes()), &response)
 	if errors.Is(err, ErrAuthentication) {
 		if err := s.Refresh(ctx); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		err = s.client.request(ctx, "GET", s.client.api+"/sync", nil, false, s.access, &response)
+		err = s.client.request(ctx, "GET", s.client.api+"/sync", nil, false, string(s.access.Bytes()), &response)
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if !validID(response.Profile.ID) || strings.ToLower(strings.TrimSpace(response.Profile.Email)) != s.client.email ||
 		(s.accountID != "" && s.accountID != response.Profile.ID) {
-		return nil, errors.New("vault account does not match session")
+		return nil, nil, errors.New("vault account does not match session")
 	}
 	if response.Profile.Key != s.protectedKey {
-		return nil, errors.New("vault key changed; login again")
+		return nil, nil, errors.New("vault key changed; login again")
 	}
 	if response.Folders == nil || response.Ciphers == nil {
-		return nil, errors.New("incomplete sync response")
+		return nil, nil, errors.New("incomplete sync response")
 	}
+	vault, err := s.decryptSnapshot(ctx, response)
+	if err != nil {
+		return nil, nil, err
+	}
+	s.accountID = response.Profile.ID
+	items := make(map[string]json.RawMessage, len(vault.Items))
+	for i, item := range vault.Items {
+		items[item.ID] = response.Ciphers[i]
+	}
+	return &Snapshot{profile: response.Profile, items: items}, vault, nil
+}
+
+func (s *Session) decryptSnapshot(ctx context.Context, response syncResponse) (*Vault, error) {
 	vault := &Vault{Profile: response.Profile, Folders: make([]Folder, 0, len(response.Folders)), Items: make([]Item, 0, len(response.Ciphers))}
 	folders := make(map[string]bool)
 	for _, folder := range response.Folders {
@@ -104,7 +133,7 @@ func (s *Session) Sync(ctx context.Context) (*Vault, error) {
 			return nil, errors.New("invalid or duplicate folder ID")
 		}
 		folders[folder.ID] = true
-		name, err := decryptText(folder.Name, s.key)
+		name, err := decryptText(folder.Name, s.key.Bytes())
 		if err != nil {
 			return nil, err
 		}
@@ -115,7 +144,7 @@ func (s *Session) Sync(ctx context.Context) (*Vault, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		item, err := decryptItem(raw, s.key)
+		item, err := decryptItem(raw, s.key.Bytes())
 		if err != nil {
 			return nil, err
 		}
@@ -128,7 +157,6 @@ func (s *Session) Sync(ctx context.Context) (*Vault, error) {
 		}
 		vault.Items = append(vault.Items, item)
 	}
-	s.accountID = response.Profile.ID
 	return vault, nil
 }
 
@@ -300,4 +328,26 @@ func (v *Vault) Read(id, path string) (string, error) {
 		return "", ErrNotFound
 	}
 	return "", ErrNotFound
+}
+
+// Read decrypts only the requested item from a previously validated snapshot.
+func (s *Session) Read(snapshot *Snapshot, id, path string) (string, error) {
+	if !s.active() {
+		return "", ErrAuthentication
+	}
+	if !validID(id) {
+		return "", errors.New("invalid item ID")
+	}
+	if snapshot == nil || snapshot.profile.ID != s.accountID || snapshot.profile.Key != s.protectedKey {
+		return "", errors.New("snapshot does not match session")
+	}
+	raw, ok := snapshot.items[id]
+	if !ok {
+		return "", ErrNotFound
+	}
+	item, err := decryptItem(raw, s.key.Bytes())
+	if err != nil {
+		return "", err
+	}
+	return (&Vault{Items: []Item{item}}).Read(id, path)
 }

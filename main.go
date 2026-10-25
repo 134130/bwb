@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"syscall"
 
 	"github.com/134130/bwb/internal/cli"
 )
 
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := cli.NewRoot().ExecuteContext(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, err)

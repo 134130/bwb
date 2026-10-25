@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/awnumar/memguard"
 )
 
 var ErrAuthentication = errors.New("login required or credentials rejected")
@@ -64,18 +66,23 @@ func (e *APIError) Is(target error) bool {
 }
 
 // Session is owned by one caller; it is not safe for concurrent operations.
-// shortcut: keys use transient Go buffers; use locked memory before daemon retention.
 type Session struct {
-	client                                   *Client
-	key                                      []byte
-	access, refresh, protectedKey, accountID string
+	client                  *Client
+	key, access, refresh    *memguard.LockedBuffer
+	protectedKey, accountID string
 }
 
 func (s *Session) Close() {
-	clear(s.key)
-	s.key = nil
-	s.access, s.refresh, s.protectedKey, s.accountID = "", "", "", ""
+	for _, buffer := range []*memguard.LockedBuffer{s.key, s.access, s.refresh} {
+		if buffer != nil {
+			buffer.Destroy()
+		}
+	}
+	s.key, s.access, s.refresh = nil, nil, nil
+	s.protectedKey, s.accountID = "", ""
 }
+
+func (s *Session) active() bool { return s.key != nil && s.key.IsAlive() }
 
 type tokens struct {
 	Access  string `json:"access_token"`
@@ -127,14 +134,17 @@ func (c *Client) Login(ctx context.Context, password []byte) (*Session, error) {
 		clear(key)
 		return nil, ErrCipher
 	}
-	return &Session{client: c, key: key, access: response.Access, refresh: response.Refresh, protectedKey: response.Key}, nil
+	defer clear(key)
+	return &Session{client: c, key: memguard.NewBufferFromBytes(key),
+		access:  memguard.NewBufferFromBytes([]byte(response.Access)),
+		refresh: memguard.NewBufferFromBytes([]byte(response.Refresh)), protectedKey: response.Key}, nil
 }
 
 func (s *Session) Refresh(ctx context.Context) error {
-	if len(s.key) == 0 || s.refresh == "" {
+	if !s.active() || s.refresh == nil {
 		return ErrAuthentication
 	}
-	form := url.Values{"grant_type": {"refresh_token"}, "client_id": {"web"}, "refresh_token": {s.refresh}}
+	form := url.Values{"grant_type": {"refresh_token"}, "client_id": {"web"}, "refresh_token": {string(s.refresh.Bytes())}}
 	var response tokens
 	if err := s.client.request(ctx, "POST", s.client.identity+"/connect/token", []byte(form.Encode()), true, "", &response); err != nil {
 		var apiErr *APIError
@@ -146,9 +156,11 @@ func (s *Session) Refresh(ctx context.Context) error {
 	if response.Access == "" {
 		return errors.New("incomplete refresh response")
 	}
-	s.access = response.Access
+	s.access.Destroy()
+	s.access = memguard.NewBufferFromBytes([]byte(response.Access))
 	if response.Refresh != "" {
-		s.refresh = response.Refresh
+		s.refresh.Destroy()
+		s.refresh = memguard.NewBufferFromBytes([]byte(response.Refresh))
 	}
 	return nil
 }

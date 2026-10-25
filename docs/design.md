@@ -168,7 +168,7 @@ CLI / TUI ─ typed local RPC ─ vault service
 - DB/config/log/argv에 plaintext 비밀번호·복호화 키·token·vault 값 없음. refresh token은 OS credential store에만 존재. logout 뒤 cache/credential 접근 불가.
 - 중복 이름, 빈 값, Unicode, 여러 줄 notes, hidden field, card/identity 기본 마스킹, RPC 크기 초과.
 
-현재 Go 제품 API의 login/refresh/sync/8종 복호화와 Cobra read를 snapshot 서버에서 검증한다. Python은 snapshot 생성·복원을 담당한다. daemon·저장 수명·TUI·Argon2id·2FA 및 공식 Bitwarden 서버 검증은 남아 있다. 현재 Session은 단일 호출 소유 일반 Go buffer이며 장기 daemon 보관 전 locked memory 구현이 필요하다. 테스트는 전용 서버·계정에만 데이터를 쓰고 실제 vault를 purge하지 않는다.
+현재 Go API의 login/refresh/sync/8종 복호화와 Cobra → daemon RPC를 snapshot 서버에서 검증한다. profile별 키·토큰은 memguard locked memory, snapshot은 암호문으로 메모리에 유지한다. read는 HTTP 없이 동작하며 lock/shutdown은 진행 중 작업을 취소하고 세션을 파기한다. 임시 crypto/HTTP/RPC 평문 복사본까지 완전히 zeroize하지는 않는다. `main.go`는 root, 패키지는 `cli`, `vaultapi`, `daemon`, `vault`, `bitwarden`으로 나눈다. keychain·디스크 cache·자동 인증 hook·TUI·Argon2id·2FA는 후속이며 재시작 후 login이 필요하다. 위 영속 저장 정책은 최종 설계이며 아직 구현하지 않았다. 테스트는 전용 서버·계정만 사용한다.
 
 ## 9. 참고한 인터페이스와 근거
 
@@ -188,4 +188,4 @@ rbw가 모든 refresh 실패를 자동 login으로 회복하거나 모든 secret
 
 BW_SESSION은 [공식 CLI의 로컬 secure storage 키](https://github.com/bitwarden/clients/blob/main/apps/cli/src/platform/services/node-env-secure-storage.service.ts)이며 API token이 아니다. bwb에서는 이 환경변수를 인증 계약으로 사용하지 않는다.
 
-의존성: 현재 사용 중인 Cobra/UUID만 go.mod에 유지한다. daemon 구현 단계에서 기존에 선택한 `github.com/134130/go-daemonkit v0.0.0-20261024090218-d756ef3418d7`을 다시 추가한다. 미사용 의존성을 보존하기 위한 빈 import는 만들지 않는다.
+의존성: Cobra/UUID, `github.com/134130/go-daemonkit v0.0.0-20261024090218-d756ef3418d7`, `github.com/awnumar/memguard v0.23.0`. memguard는 직접 OS별 메모리 보호 코드를 만들지 않고 locked memory와 명시적 파기를 사용하기 위한 선택이다. daemonkit의 SQLite/keychain 전이 의존성은 포함되지만 현재 vault 영속 저장에는 사용하지 않는다.

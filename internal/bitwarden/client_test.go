@@ -3,6 +3,7 @@ package bitwarden
 import (
 	"context"
 	"errors"
+	"github.com/awnumar/memguard"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -92,12 +93,22 @@ func TestRefreshRetryBoundedAndClose(t *testing.T) {
 	for i := range key {
 		key[i] = 1
 	}
-	s := &Session{client: c, key: key, access: "expired", refresh: "old"}
+	s := &Session{client: c, key: memguard.NewBufferFromBytes(key), access: memguard.NewBufferFromBytes([]byte("expired")), refresh: memguard.NewBufferFromBytes([]byte("old"))}
+	defer s.Close()
+	oldAccess, oldRefresh := s.access, s.refresh
 	if _, err := s.Sync(context.Background()); !errors.Is(err, ErrAuthentication) {
 		t.Fatal(err)
 	}
-	if syncCalls != 2 || refreshCalls != 1 || s.refresh != "rotated" {
+	if syncCalls != 2 || refreshCalls != 1 || string(s.refresh.Bytes()) != "rotated" {
 		t.Fatal("incorrect refresh/retry")
+	}
+	if oldAccess.IsAlive() || oldRefresh.IsAlive() {
+		t.Fatal("old tokens survived refresh")
+	}
+	keyBuffer, accessBuffer, refreshBuffer := s.key, s.access, s.refresh
+	s.Close()
+	if keyBuffer.IsAlive() || accessBuffer.IsAlive() || refreshBuffer.IsAlive() {
+		t.Fatal("secret buffers survived Close")
 	}
 	s.Close()
 	for _, b := range key {
@@ -130,7 +141,7 @@ func TestSyncRejectsIdentityKeyChangeAndIncompleteResponse(t *testing.T) {
 	} {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, body) }))
 		c, _ := NewClient(server.URL, "user@example.invalid", testDevice)
-		session := &Session{client: c, key: make([]byte, 64), access: "token", protectedKey: "wrapped"}
+		session := &Session{client: c, key: memguard.NewBuffer(64), access: memguard.NewBufferFromBytes([]byte("token")), protectedKey: "wrapped"}
 		vault, err := session.Sync(context.Background())
 		session.Close()
 		server.Close()

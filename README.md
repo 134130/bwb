@@ -1,6 +1,6 @@
 # bwb
 
-Bitwarden를 CLI와 TUI로 사용하는 Go 클라이언트. 현재는 Cobra 기반 `read` 명령과 직접 API 로그인·sync·복호화까지 구현했다. daemon/TUI는 다음 단계다.
+Bitwarden를 CLI와 TUI로 사용하는 Go 클라이언트. 현재는 Cobra CLI → go-daemonkit RPC → 메모리 세션 → Bitwarden 직접 API까지 구현했다. TUI는 후속이다.
 
 - [요구사항과 인터페이스 제안](docs/design.md)
 - [Full integration 개발 환경](dev/README.md)
@@ -16,19 +16,38 @@ BW_SESSION이나 bw/rbw 실행 파일에 의존하지 않는다. 세부 설계�
 ## 현재 실행 범위
 
 ```sh
-go run . --help
-go run . read ITEM_ID login/password --server SERVER_URL --email EMAIL --password-stdin
+go build -o .dev/bwb .
+.dev/bwb login --profile personal --server SERVER_URL --email EMAIL --password-stdin < PASSWORD_INPUT
+.dev/bwb read --profile personal ITEM_ID login/password
+.dev/bwb sync --profile personal
+.dev/bwb status --profile personal
+.dev/bwb lock --profile personal
+.dev/bwb daemon stop
 ```
 
-`read`의 비밀번호는 stdin으로 공급한다. 비밀번호를 argv에 넣거나 echo가 켜진 터미널에 직접 입력하지 않는다. 마지막 LF/CRLF 한 개만 제거하며 비밀번호의 공백은 유지한다. 출력에는 줄바꿈을 추가하지 않는다. `name`, `notes`, `fields/NAME`, `TYPE/FIELD`를 읽을 수 있다.
+`PASSWORD_INPUT`은 안전하게 공급한 stdin을 뜻한다. 비밀번호를 argv에 넣거나 echo가 켜진 터미널에 직접 입력하지 않는다. 마지막 LF/CRLF 한 개만 제거하며 공백은 유지한다. `read`는 줄바꿈을 추가하지 않는다. `name`, `notes`, `fields/NAME`(슬래시 포함), `TYPE/FIELD` 지원. 현재 RPC 응답 제한 때문에 필드 하나는 최대 10,000 bytes다.
 
-이 첫 구현은 호출마다 login/sync하고 종료 시 key buffer를 지운다. 저장된 인증·profile/config 해석·대화형 prompt·URI reference·daemon cache는 아직 없다. device ID도 호출마다 새로 생성한다. 현재 오류 종료 코드는 1이며 세부 코드 분류는 후속이다.
+첫 login이 같은 바이너리의 `daemon run`을 자동 시작한다. profile 기본값은 `default`. login은 API 인증과 첫 sync를 함께 수행하고, 이후 별도 CLI 프로세스의 read는 HTTP 없이 cached ciphertext를 복호화한다. sync 실패나 잘못된 재로그인은 기존 snapshot/세션을 유지한다. refresh는 sync 중 401에 한 번 시도한다. 자동 login hook은 아직 없다.
 
-지원 범위는 PBKDF2(100000–2000000 iterations), 개인 vault, AES-CBC/HMAC `2.` 암호문, 8종의 기본 필드다. Argon2id, 2FA/SSO, 조직 vault, item별 key, reprompt, passkey는 아직 지원하지 않는다. 메모리는 일반 Go buffer이며 daemon용 locked memory 보장을 하지 않는다. API 서버와의 공식 Bitwarden 상호운용성은 별도 검증이 필요하다.
+`status`와 `lock`은 daemon을 시작하지 않는다. lock은 선택 profile의 진행 중 작업을 취소하고 키·토큰·snapshot을 제거한다. 이미 반환한 평문이나 전송 중인 RPC 응답은 회수하지 않는다. daemon 종료는 전체 profile을 잠그며 재시작 후 login이 필요하다. profile은 현재 메모리 이름이며 config 파일 해석·keychain·디스크 vault cache·idle timeout은 후속이다. device ID는 로그인마다 생성한다.
+
+```text
+main.go → internal/cli (Cobra)
+              ↓ internal/vaultapi (typed RPC)
+          internal/daemon (Manager, App, handlers)
+              ↓
+          internal/vault (profile, cancellation, session lifetime)
+              ↓
+          internal/bitwarden (HTTP, crypto, encrypted snapshot)
+```
+
+키와 access/refresh token의 장기 보관은 `memguard` locked memory를 사용한다. 평문 snapshot은 보관하지 않는다. crypto·HTTP·JSON·RPC 처리 중 임시 Go 문자열/버퍼는 생기며 모든 복사본의 즉시 zeroize를 보장하지 않는다. 메모리 보호 실패 시 평문 fallback은 없다. 같은 OS 사용자 프로세스는 daemon 접근 가능하다. daemonkit의 실행 파일·로그·SQLite 인프라는 디스크에 생기지만 vault·비밀번호·token을 거기에 기록하지 않는다. Unix 격리 경로는 `XDG_STATE_HOME`으로 지정한다.
+
+지원 범위는 PBKDF2(100000–2000000 iterations), 개인 vault, AES-CBC/HMAC `2.` 암호문, 8종의 기본 필드다. Argon2id, 2FA/SSO, 조직 vault, item별 key, reprompt, passkey는 아직 지원하지 않는다. 공식 Bitwarden 서버와의 상호운용성은 별도 검증이 필요하다.
 
 ```sh
 go test ./...
 mise run integration
 ```
 
-integration은 실제 Vaultwarden에서 Go API 코드와 Cobra 명령을 실행해 snapshot 기대값과 비교한다. Python은 서버 복원과 snapshot 생성에만 쓰며 제품의 암호화 구현은 Go 표준 라이브러리를 사용한다.
+integration은 실제 Vaultwarden에서 Go API 코드와 빌드된 CLI·daemon을 실행해 snapshot 기대값, profile 격리, offline read의 HTTP 0회, lock 중 로그인 취소, 재시작 잠금을 검사한다. Python은 서버 복원과 snapshot 생성에만 쓰며 제품의 암호화 구현은 Go 표준 라이브러리를 사용한다.
