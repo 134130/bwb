@@ -1,16 +1,18 @@
+source_dir: .mise/tasks
+
 pre-commit:
   jobs:
     - name: tidy
       glob: "*.go"
-      run: go mod tidy
+      run: mise run tidy
       stage_fixed: true
     - name: golangci-lint
       glob: "*.go"
-      run: golangci-lint fmt {staged_files}
+      run: mise run fmt -- {staged_files}
       stage_fixed: true
     - name: test
       glob: "*.go"
-      run: mise test
+      run: mise run test
     - name: integration
-      script: integration.sh
+      script: integration
       runner: sh

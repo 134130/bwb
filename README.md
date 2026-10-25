@@ -113,3 +113,5 @@ bwb --profile personal status --verbose
 ```
 
 `daemon status`는 Ready인 daemon의 선택된 config 절대 경로를 표시한다(기본 파일이 없더라도 선택된 경로 표시). `status --verbose`는 적용 중인 서버·계정·lock_timeout과 UTC 잠금 예정 시각 `LOCK_AT`을 표시한다. 잠겼거나 자동 잠금이 꺼졌으면 예정 시각은 `-`다. Config 없는 legacy profile은 저장된 계정과 timeout 0s를 표시한다. 두 명령은 daemon을 자동 시작하거나 활동 시간을 연장하지 않는다. 기본 `status`의 한 줄 출력은 유지한다. TOML이 잘못된 경우에도 `daemon status`와 명시적 `--profile NAME status --verbose`로 현재 적용 상태를 확인할 수 있다.
+
+릴리스는 `mise run release`로 실행한다. 게시 없는 빌드 검증은 `mise run release -- --snapshot --skip=publish`다. GitHub Actions도 `v*` 태그 push에서 같은 task를 호출한다. 지원 대상과 환경 요구사항은 [개발 문서](dev/README.md#release와-hook-관리)를 참고한다.

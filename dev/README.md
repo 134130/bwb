@@ -65,3 +65,16 @@ fixture를 바꾸고 snapshot 재생성을 잊으면 checksum 검사에서 실�
 `dev/compose.yaml`은 별도의 수동 개발 서버 구성이다. pre-commit integration runner는 이 장기 volume을 사용하지 않는다.
 
 - 상태 조회 integration은 daemon 설정 경로, reload 전후 실제 timeout, 잘못된 TOML 중 조회, verbose 조회의 잠금 시각 불변과 stopped 조회의 무기동을 검사한다.
+
+## Release와 hook 관리
+
+개발 도구 버전과 실행 명령은 `mise.toml` 및 `.mise/tasks/`에서 관리한다. `mise run init`으로 lefthook을 설치한다. Lefthook은 `mise run tidy`, `mise run fmt -- <staged files>`, `mise run test`를 호출한다. Integration 진입점은 `.mise/tasks/pre-commit/integration`(mise task `pre-commit:integration`)이며 기존 `mise run integration`을 실행한다. Lefthook 2.2의 일반 run 작업은 빈 커밋에서 생략되므로 integration만 script 작업으로 연결해 매 커밋 검사를 유지한다.
+
+```sh
+mise run release:check
+mise run release -- --snapshot --skip=publish
+```
+
+Snapshot은 `dist/`에만 생성되며 GitHub에 게시하지 않는다. Native macOS keychain이 CGO와 Apple framework를 사용하므로 전체 릴리스 빌드는 Xcode Command Line Tools가 설치된 macOS에서 실행한다. 대상은 macOS/Linux의 amd64·arm64이며 archive와 SHA-256 `checksums.txt`를 생성한다. 현재 Windows 대화형 인증은 지원하지 않아 릴리스 대상에서 제외한다. macOS 서명·공증은 아직 하지 않는다.
+
+정식 게시 진입점은 `mise run release`다. 깨끗한 작업 트리의 `vX.Y.Z` 태그에서 `GITHUB_TOKEN`을 제공하면 게시한다. `vX.Y.Z-rc.1` 같은 태그는 prerelease로 분류한다. `.github/workflows/release.yml`은 `v*` 태그 push에서만 실행되며 macOS runner에 mise 도구를 설치하고 동일한 task를 호출한다. Workflow에 별도 빌드 명령은 없다. 일반 PR/push CI는 추가하지 않는다. Release task는 단위 테스트와 GoReleaser 설정 검사를 먼저 실행한다. Docker·OS keychain을 사용하는 full integration은 기존 로컬 pre-commit에서 계속 실행한다.

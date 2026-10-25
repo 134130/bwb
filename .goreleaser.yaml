@@ -1,0 +1,35 @@
+version: 2
+project_name: bwb
+
+builds:
+  - id: linux
+    main: .
+    binary: bwb
+    env:
+      - CGO_ENABLED=0
+    goos: [linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags: [-s -w]
+  - id: darwin
+    main: .
+    binary: bwb
+    env:
+      - CGO_ENABLED=1
+    goos: [darwin]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags: [-s -w]
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - dev/config.example.toml
+
+checksum:
+  name_template: checksums.txt
+
+release:
+  prerelease: auto

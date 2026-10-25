@@ -1,0 +1,4 @@
+#!/bin/sh
+#MISE description="Run integration for every commit, including empty commits"
+# Lefthook script jobs run even when no files are staged.
+exec mise run integration
