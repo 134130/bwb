@@ -119,6 +119,22 @@ def main():
             assert secret not in view()
             send('\r')
             until(lambda: secret in view())
+            send('r')
+            until(lambda: secret not in view())
+            pause()
+            until(lambda: 'Working' not in view() and 'Enter reveals selected field' in view())
+            assert 'GitHub' in screen.display[2]
+            assert any('>' in line[:60] and 'GitHub (demo)' in line[:60] for line in screen.display)
+            # Refresh resets field selection; explicitly select password again.
+            for _ in range(10):
+                if any('> password ' in line[60:] for line in screen.display):
+                    break
+                send('\x1b[B')
+                pause()
+            else:
+                raise AssertionError('password field missing after sync')
+            send('\r')
+            until(lambda: secret in view())
             send('\t')
             until(lambda: secret not in view())
             send('\r\r')

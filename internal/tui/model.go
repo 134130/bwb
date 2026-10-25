@@ -101,9 +101,20 @@ func (r *Root) operation(kind string, call func(context.Context) (any, error)) t
 	r.message = ""
 	return func() tea.Msg { defer cancel(); value, err := call(ctx); return resultMsg{epoch, kind, value, err} }
 }
-func (r *Root) load() tea.Cmd {
+func (r *Root) load() tea.Cmd { return r.loadCatalog(false) }
+func (r *Root) loadCatalog(sync bool) tea.Cmd {
 	profile := r.profile
-	return r.operation("catalog", func(ctx context.Context) (any, error) {
+	kind := "catalog"
+	if sync {
+		kind = "sync"
+		r.explorer.Detail.clearValue()
+	}
+	return r.operation(kind, func(ctx context.Context) (any, error) {
+		if sync {
+			if _, err := r.executor.Sync(ctx, vaultapi.ProfileRequest{Profile: profile}); err != nil {
+				return nil, err
+			}
+		}
 		catalog := map[string][]vaultapi.ListEntry{}
 		for _, kind := range []string{"organization", "collection", "folder", "item"} {
 			entries, err := r.executor.List(ctx, vaultapi.ListRequest{Profile: profile, Kind: kind, Background: true})
@@ -301,14 +312,15 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return r, nil
 		}
 		switch m.Kind {
-		case "catalog":
+		case "catalog", "sync":
 			r.epoch++ // Discard status polls begun before authentication completed.
 			r.state.State = "unlocked"
 			t := &r.explorer.Tree
+			restore := len(t.Rows) == 0 && t.Query == ""
 			t.Roots = buildTree(m.Value.(map[string][]vaultapi.ListEntry))
 			left, _ := r.explorer.layout(size)
-			t.rebuild("", left)
-			if t.savedKey != "" {
+			t.rebuild(t.Query, left)
+			if restore && t.savedKey != "" {
 				for i, row := range t.Rows {
 					if row.Node.Key == t.savedKey {
 						t.Index = i
@@ -338,6 +350,9 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return r, nil
 	case revealMsg:
+		if r.busy && r.workKind == "sync" {
+			return r, nil
+		}
 		n := r.explorer.Tree.current()
 		if n == nil || n.Item == nil || n.Item.ID != m.ID || r.explorer.Focus != "detail" || len(r.explorer.Detail.Fields) == 0 || r.explorer.Detail.Fields[r.explorer.Detail.Index].Path != m.Field {
 			return r, nil
@@ -411,6 +426,9 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if r.help {
 			return r, nil
 		}
+		if r.busy && r.workKind == "sync" {
+			return r, nil
+		}
 		if key == "ctrl+p" {
 			r.explorer.Detail.clearValue()
 			r.confirmLogout = ""
@@ -453,6 +471,9 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return r, nil
 		}
+		if key == "r" && r.explorer.Focus != "search" {
+			return r, r.loadCatalog(true)
+		}
 		before := r.explorer.Tree.key()
 		oldFocus := r.explorer.Focus
 		field := r.explorer.Detail.Index
@@ -490,7 +511,7 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 func (r *Root) View() tea.View {
 	title := fmt.Sprintf("bwb · %s    Explorer / Profiles [Ctrl+P]    %s", safe(r.profile), safe(r.state.State))
-	footer := "/ search  ←→ tree  Tab pane  Enter open  s sort  Ctrl+L lock  ? help  q quit"
+	footer := "/ search  ←→ tree  Tab pane  Enter open  s sort  r sync  Ctrl+L lock  ? help  q quit"
 	body := "Vault locked · Enter to login/unlock"
 	size := r.contentSize()
 	if r.page == "profiles" {
@@ -505,7 +526,7 @@ func (r *Root) View() tea.View {
 		footer = r.message
 	}
 	if r.help {
-		body = "Explorer: / fuzzy search; directory matches include descendants.\nEnter/Esc leave search editing; Esc again restores the original tree.\nArrows or hjkl navigate; Tab changes pane; s reverses name order.\nEnter on a field reveals it; Enter hides it; PgUp/PgDown scroll value.\nCtrl+P opens Profiles; u authenticates; l locks; x logs out; r reloads.\nUser navigation renews idle time; polling does not.\nq quits without locking the daemon; Ctrl+L locks.\n? closes help."
+		body = "Explorer: / fuzzy search; directory matches include descendants.\nEnter/Esc leave search editing; Esc again restores the original tree.\nArrows or hjkl navigate; Tab changes pane; s reverses name order.\nExplorer: r syncs and refreshes, preserving search and tree position.\nEnter on a field reveals it; Enter hides it; PgUp/PgDown scroll value.\nCtrl+P opens Profiles; u authenticates; l locks; x logs out; r reloads.\nUser navigation renews idle time; polling does not.\nq quits without locking the daemon; Ctrl+L locks.\n? closes help."
 	}
 	if r.confirmLogout != "" {
 		body = "Remove saved authentication for " + safe(r.confirmLogout) + "? [y/N]"

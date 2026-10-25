@@ -128,6 +128,7 @@ bwb --profile personal tui
 - `/`: 검색 입력. `Enter` 또는 `Esc`: 검색어를 유지하고 tree로 복귀. Tree에서 `Esc`: 검색 해제 및 원래 위치 복원.
 - `Tab`: tree/상세 pane. 좁은 화면에서는 상세가 별도 화면으로 전환된다.
 - 항목에서 `Enter`: 상세로 이동. 필드에서 `Enter`: 값 표시/숨김. `PgUp/PgDown`: 긴 값 스크롤.
+- `r`: Explorer 수동 sync. 성공 시 검색·선택·펼침·정렬을 유지해 갱신한다. 실패 시 기존 목록을 유지하며 표시 중인 비밀은 즉시 숨긴다. 진행 중 잠금·종료는 가능하다.
 - `Ctrl+P`: Profiles. `Enter`/`u`: profile 선택·인증. `l`: 선택 profile 잠금. `x`: 확인 후 logout. `r`: daemon이 선택한 TOML 전체 reload.
 - `Ctrl+L`: 현재 profile 잠금. `?`: 도움말. `q`: 종료(daemon은 기존 timeout 정책 유지). 비밀번호 창은 `Esc`로 취소한다.
 

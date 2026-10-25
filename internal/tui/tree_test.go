@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -176,5 +177,62 @@ func TestLeavingDetailDiscardsPendingRead(t *testing.T) {
 			t.Fatal("stale reveal survived focus change")
 		}
 		cancel()
+	}
+}
+
+func TestSyncPreservesNavigationAndRejectsLateSecrets(t *testing.T) {
+	catalog := map[string][]vaultapi.ListEntry{
+		"folder": {{ID: "a", Name: "Work"}, {ID: "b", Name: "Other"}},
+		"item":   {{ID: "one", Name: "GitHub", Folder: &vaultapi.NamedID{ID: "a"}}},
+	}
+	r := &Root{ctx: context.Background(), page: "explorer", size: Size{120, 34}, explorer: newExplorer(), state: vaultapi.StatusResponse{State: "unlocked"}}
+	tree := &r.explorer.Tree
+	tree.Roots = buildTree(catalog)
+	tree.rebuild("", Size{60, 30})
+	tree.Index = len(tree.Rows) - 1
+	tree.rebuild("Git", Size{60, 30})
+	tree.Index = len(tree.Rows) - 1
+	tree.Reverse = true
+	tree.collapsed["unused"] = true
+	tree.filteredCollapsed["unused"] = true
+	key, saved := tree.key(), tree.savedKey
+	r.explorer.Search.SetValue("Git")
+	r.explorer.Detail.Value = "secret"
+	r.explorer.Detail.Revealed = true
+	oldEpoch := r.epoch
+	r.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	defer r.cancel()
+	if !r.busy || r.workKind != "sync" || r.explorer.Detail.Value != "" {
+		t.Fatal("sync did not start or clear secret")
+	}
+	r.Update(resultMsg{Epoch: oldEpoch, Kind: "read", Value: vaultapi.ReadResponse{Value: "late"}})
+	r.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	if tree.key() != key || r.explorer.Detail.Value != "" {
+		t.Fatal("pending sync allowed navigation or late secret")
+	}
+	catalog["item"][0].Name = "GitHub updated"
+	r.Update(resultMsg{Epoch: r.epoch, Kind: "sync", Value: catalog})
+	if tree.current().Name != "GitHub updated" {
+		t.Fatal("sync did not replace cached metadata")
+	}
+	if tree.key() != key || tree.Query != "Git" || tree.savedKey != saved || !tree.Reverse || !tree.collapsed["unused"] || !tree.filteredCollapsed["unused"] || r.explorer.Search.Value() != "Git" {
+		t.Fatal("sync lost navigation")
+	}
+	r.Update(resultMsg{Epoch: oldEpoch, Kind: "read", Value: vaultapi.ReadResponse{Value: "late"}})
+	if r.explorer.Detail.Value != "" {
+		t.Fatal("late secret restored")
+	}
+}
+
+func TestFailedSyncKeepsTreeAndSearch(t *testing.T) {
+	r := &Root{ctx: context.Background(), page: "explorer", explorer: newExplorer(), state: vaultapi.StatusResponse{State: "unlocked"}}
+	r.explorer.Tree.Roots = sampleTree()
+	r.explorer.Tree.rebuild("gh", Size{60, 30})
+	before := keys(&r.explorer.Tree)
+	r.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	defer r.cancel()
+	r.Update(resultMsg{Epoch: r.epoch, Kind: "sync", Err: errors.New("offline")})
+	if r.busy || r.message != "offline" || r.explorer.Tree.Query != "gh" || !reflect.DeepEqual(before, keys(&r.explorer.Tree)) {
+		t.Fatal("failed sync discarded cached UI")
 	}
 }
