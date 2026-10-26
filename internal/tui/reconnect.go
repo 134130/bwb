@@ -17,7 +17,7 @@ type connected struct {
 func (r *Root) reconnect() tea.Cmd {
 	connect, lifetime := r.connect, r.ctx
 	return r.operation("connected", func(ctx context.Context) (any, error) {
-		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
 		client, err := connect(ctx)
 		if err != nil {

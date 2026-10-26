@@ -199,3 +199,16 @@ TUI 상세의 `Authentication code`를 Enter로 열면 같은 화면을 사용�
 Base32 시드 및 표준 `otpauth://totp` URI, SHA1/SHA256/SHA512, 6·8자리와 1–86400초 주기를 지원한다. HOTP·Steam 형식은 명시적 오류다. 생성 시각은 daemon의 시스템 시계를 따른다.
 
 TOTP 대화형 화면도 연결 종료 시 코드를 제거하고 Enter로 재연결한다. 필요 시 다시 인증하며 새 코드를 조회한다.
+
+
+### Daemon version updates
+
+릴리스 바이너리는 CLI와 daemon에 같은 버전을 주입한다. 일반 명령이 daemon에 연결할 때, stdin·stdout이 모두 터미널이고 CLI의 안정 릴리스 버전이 더 높으면 설치된 CLI 바이너리로 daemon을 자동 교체한다. 원격 다운로드는 없다. 같은 버전·더 최신 daemon·dev·prerelease·비교 불가능 버전은 자동 교체하지 않는다. 상태·버전 조회는 업데이트를 실행하지 않는다.
+
+비대화형·파이프·리다이렉션·`--non-interactive`에서는 기존 daemon을 유지하고 stderr에 한 번만 안내한다. stdout 데이터는 바꾸지 않는다.
+
+```text
+bwb: daemon v0.3.0 is older than CLI v0.4.0. Run: bwb daemon update
+```
+
+자동 교체는 실행 중 daemon의 config 경로를 유지하고 파일을 먼저 검증한다. 모든 profile의 메모리 세션과 진행 작업은 재시작으로 종료된다. 현재 대화형 명령은 필요한 인증을 거쳐 계속하며 다른 TUI는 기존 재연결 흐름을 따른다. 자동 업데이트끼리는 버전 확인·교체를 직렬화한다. 명시적 `daemon update`는 버전과 무관한 수동 교체 동작을 유지한다. 교체 실패는 오류로 반환하며 daemonkit의 바이너리·프로세스 롤백을 사용한다. 데이터 마이그레이션 롤백은 포함하지 않는다.

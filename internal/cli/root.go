@@ -29,7 +29,7 @@ func NewRoot() *cobra.Command {
 	var configPath string
 	root.PersistentFlags().StringVar(&configPath, "config", "", "Config file (overrides BWB_CONFIG)")
 	var nonInteractive bool
-	root.PersistentFlags().BoolVar(&nonInteractive, "non-interactive", false, "Never prompt for authentication")
+	root.PersistentFlags().BoolVar(&nonInteractive, "non-interactive", false, "Never prompt or automatically update the daemon")
 	root.PersistentFlags().StringVar(&profile, "profile", "default", "Vault profile")
 	var server, email string
 	var passwordStdin bool

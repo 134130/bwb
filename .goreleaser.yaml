@@ -10,7 +10,7 @@ builds:
     goos: [linux]
     goarch: [amd64, arm64]
     flags: [-trimpath]
-    ldflags: [-s -w]
+    ldflags: ["-s -w -X github.com/134130/bwb/internal/daemon.Version=v{{ .Version }}"]
   - id: darwin
     main: .
     binary: bwb
@@ -19,7 +19,7 @@ builds:
     goos: [darwin]
     goarch: [amd64, arm64]
     flags: [-trimpath]
-    ldflags: [-s -w]
+    ldflags: ["-s -w -X github.com/134130/bwb/internal/daemon.Version=v{{ .Version }}"]
 
 archives:
   - formats: [tar.gz]

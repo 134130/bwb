@@ -13,12 +13,15 @@ import (
 	"github.com/134130/bwb/internal/daemon"
 	kit "github.com/134130/go-daemonkit"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 type commandConfig struct {
 	path        string
 	startupPath string
 	file        *config.File
+	interactive bool
+	notice      func(string)
 }
 type configKey struct{}
 
@@ -32,6 +35,14 @@ func prepareConfig(cmd *cobra.Command, pathFlag string, profile *string, changed
 		return err
 	}
 	state := commandConfig{path: path}
+	input, inOK := cmd.InOrStdin().(*os.File)
+	output, outOK := cmd.OutOrStdout().(*os.File)
+	nonInteractive, _ := cmd.Flags().GetBool("non-interactive")
+	state.interactive = !nonInteractive && inOK && outOK && term.IsTerminal(int(input.Fd())) && term.IsTerminal(int(output.Fd()))
+	var once sync.Once
+	state.notice = func(message string) {
+		once.Do(func() { _, _ = fmt.Fprintln(cmd.ErrOrStderr(), message) })
+	}
 	if explicit {
 		state.startupPath = path
 	}
@@ -76,7 +87,7 @@ func connectContext(ctx context.Context) (*kit.Client, error) {
 			}
 		}()
 	}
-	return daemon.Connect(ctx)
+	return daemon.Connect(ctx, state.interactive, state.notice)
 }
 
 func configCommands() (*cobra.Command, *cobra.Command) {

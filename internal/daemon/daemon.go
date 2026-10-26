@@ -12,25 +12,19 @@ import (
 	kit "github.com/134130/go-daemonkit"
 )
 
+var Version string // Set by release builds.
+
 func Options() kit.Options {
-	version := "dev"
-	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
-		version = info.Main.Version
+	version := Version
+	if version == "" {
+		version = "dev"
+		if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+			version = info.Main.Version
+		}
 	}
 	return kit.Options{AppID: "bwb", Version: version, InstanceID: os.Getenv("BWB_INSTANCE")}
 }
 func Manager() (*kit.Manager, error) { return kit.NewManager(Options(), "daemon", "run") }
-
-func Connect(ctx context.Context) (*kit.Client, error) {
-	manager, err := Manager()
-	if err != nil {
-		return nil, err
-	}
-	if err := manager.EnsureRunning(ctx); err != nil {
-		return nil, err
-	}
-	return kit.Connect(ctx, Options())
-}
 
 func Run(ctx context.Context, configFlag string) error {
 	path, explicit, err := config.Path(configFlag)
