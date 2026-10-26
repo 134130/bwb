@@ -22,7 +22,7 @@ func writeStatus(out io.Writer, profile string, result vaultapi.StatusResponse) 
 }
 
 func daemonStatusCommand() *cobra.Command {
-	return &cobra.Command{Use: "status", Short: "Show daemon state and its selected config path without starting it", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	return &cobra.Command{Use: "status", Short: "Show daemon state, version and selected config path without starting it", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		manager, err := daemon.Manager()
 		if err != nil {
 			return err
@@ -44,7 +44,7 @@ func daemonStatusCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		_, err = fmt.Fprintf(cmd.OutOrStdout(), "STATE\t%s\nCONFIG\t%s\n", display(string(state.State)), display(result.ConfigPath))
+		_, err = fmt.Fprintf(cmd.OutOrStdout(), "STATE\t%s\nVERSION\t%s\nCONFIG\t%s\n", display(string(state.State)), display(state.Version), display(result.ConfigPath))
 		return err
 	}}
 }

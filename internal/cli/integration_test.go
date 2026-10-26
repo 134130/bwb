@@ -5,6 +5,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"debug/buildinfo"
 	"encoding/json"
 	"fmt"
 	"github.com/134130/bwb/internal/vaultapi"
@@ -49,6 +50,11 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %v: %s", err, output)
 	}
+	info, err := buildinfo.ReadFile(binary)
+	if err != nil || !strings.HasPrefix(info.Main.Version, "v") {
+		t.Fatal("build has no VCS version", err)
+	}
+	version := info.Main.Version
 	// Keep the Unix socket path within the platform limit.
 	state, err := os.MkdirTemp("/tmp", "bwb-")
 	if err != nil {
@@ -146,11 +152,13 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 		}
 	}()
 	must("", "stopped\n", "status")
+	must("", "bwb version "+version+"\n", "--version")
+	must("", "bwb version "+version+"\n", "--config", "missing.toml", "version")
 	must("", "stopped\n", "daemon", "status")
 	must("", "stopped\n", "status", "--verbose")
 	entries, err := os.ReadDir(state)
 	if err != nil || len(entries) != 0 {
-		t.Fatal("status created daemon state", err)
+		t.Fatal("status/version created daemon state", err)
 	}
 	login := []string{"login", "--server", endpoint.URL, "--email", manifest.Email, "--password-stdin"}
 	must(manifest.Password+"\n", "", login...)
@@ -501,7 +509,7 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	}
 	must("", "config valid\n", "--config", configPath, "config", "validate")
 	must(manifest.Password+"\n", "", "--config", configPath, "login", "--password-stdin")
-	must("", "STATE\tready\nCONFIG\t"+configPath+"\n", "daemon", "status")
+	must("", "STATE\tready\nVERSION\t"+version+"\nCONFIG\t"+configPath+"\n", "daemon", "status")
 	verbose, err := run("", "--profile", "timed", "status", "--verbose")
 	if err != nil || !strings.Contains(verbose, "SERVER\t"+endpoint.URL+"\n") || !strings.Contains(verbose, "EMAIL\t"+manifest.Email+"\n") || !strings.Contains(verbose, "LOCK_TIMEOUT\t1s\n") || strings.Contains(verbose, "LOCK_AT\t-\n") {
 		t.Fatal("applied status", verbose, err)
@@ -571,7 +579,7 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	if _, err := run("", "daemon", "reload"); err == nil {
 		t.Fatal("malformed reload accepted")
 	}
-	must("", "STATE\tready\nCONFIG\t"+configPath+"\n", "--config", "does-not-exist.toml", "daemon", "status")
+	must("", "STATE\tready\nVERSION\t"+version+"\nCONFIG\t"+configPath+"\n", "--config", "does-not-exist.toml", "daemon", "status")
 	must("", "PROFILE\tsteady\nSTATE\tlocked\nSERVER\t"+endpoint.URL+"\nEMAIL\t"+manifest.Email+"\nLOCK_TIMEOUT\t100ms\nLOCK_AT\t-\n", "--config", configPath, "--profile", "steady", "status", "--verbose")
 	must(manifest.Password+"\n", "", "--config", configPath, "--profile", "timed", "unlock", "--password-stdin")
 	waitLocked()

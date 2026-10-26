@@ -8,7 +8,28 @@ import (
 	"strings"
 	"testing"
 	"testing/synctest"
+
+	"github.com/134130/bwb/internal/daemon"
 )
+
+func TestVersionIgnoresConfiguration(t *testing.T) {
+	isolateConfig(t)
+	for _, args := range [][]string{{"--version"}, {"version"}} {
+		root := NewRoot()
+		var out bytes.Buffer
+		root.SetOut(&out)
+		root.SetArgs(append([]string{"--config", "missing.toml"}, args...))
+		if err := root.Execute(); err != nil || out.String() != "bwb version "+daemon.Options().Version+"\n" {
+			t.Fatal(out.String(), err)
+		}
+	}
+	root := NewRoot()
+	root.SetOut(brokenListWriter{})
+	root.SetArgs([]string{"version"})
+	if err := root.Execute(); err == nil {
+		t.Fatal("version ignored output error")
+	}
+}
 
 func TestHelpAndInputErrors(t *testing.T) {
 	isolateConfig(t)

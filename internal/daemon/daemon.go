@@ -5,6 +5,7 @@ import (
 	"context"
 	"github.com/134130/bwb/internal/config"
 	"os"
+	"runtime/debug"
 
 	"github.com/134130/bwb/internal/vault"
 	"github.com/134130/bwb/internal/vaultapi"
@@ -12,7 +13,11 @@ import (
 )
 
 func Options() kit.Options {
-	return kit.Options{AppID: "bwb", Version: "dev", InstanceID: os.Getenv("BWB_INSTANCE")}
+	version := "dev"
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		version = info.Main.Version
+	}
+	return kit.Options{AppID: "bwb", Version: version, InstanceID: os.Getenv("BWB_INSTANCE")}
 }
 func Manager() (*kit.Manager, error) { return kit.NewManager(Options(), "daemon", "run") }
 

@@ -80,6 +80,8 @@ mise run release -- --snapshot --skip=publish
 
 Snapshot은 `dist/`에만 생성되며 GitHub에 게시하지 않는다. Native macOS keychain이 CGO와 Apple framework를 사용하므로 전체 릴리스 빌드는 Xcode Command Line Tools가 설치된 macOS에서 실행한다. 대상은 macOS/Linux의 amd64·arm64이며 archive와 SHA-256 `checksums.txt`를 생성한다. 현재 Windows 대화형 인증은 지원하지 않아 릴리스 대상에서 제외한다. macOS 서명·공증은 아직 하지 않는다.
 
+바이너리 버전은 Go 1.27의 build info를 사용한다. `go build`와 GoReleaser 모두 빌드한 HEAD의 `vA.B.C` 태그를 자동 기록하므로 별도 ldflags 주입은 없다. 변경된 작업 트리는 `+dirty`, 태그 없는 커밋은 Go pseudo-version을 표시한다. `bwb version`/`--version`으로 CLI, `bwb daemon status`의 `VERSION`으로 실행 중 daemon을 확인한다. `-buildvcs=false`나 Git 정보 없는 소스 빌드는 `dev`를 표시할 수 있다.
+
 정식 게시 진입점은 `mise run release`다. 깨끗한 작업 트리의 `vX.Y.Z` 태그에서 `GITHUB_TOKEN`을 제공하면 게시한다. `vX.Y.Z-rc.1` 같은 태그는 prerelease로 분류한다. `.github/workflows/release.yml`은 `v*` 태그 push에서만 실행되며 macOS runner에 mise 도구를 설치하고 동일한 task를 호출한다. Workflow에 별도 빌드 명령은 없다. 일반 PR/push CI는 추가하지 않는다. Release task는 단위 테스트와 GoReleaser 설정 검사를 먼저 실행한다. Docker·OS keychain을 사용하는 full integration은 기존 로컬 pre-commit에서 계속 실행한다.
 
 TUI 테스트는 `dev/integration/tui.py`에서 실제 controlling PTY와 pyte 화면 해석기를 사용한다. 의존성을 갱신하려면 `.dev/venv/bin/python -m pip install -r dev/integration/requirements.txt`를 실행한다. Snapshot integration마다 검색 tree·상세 표시/숨김·resize·외부 lock·unlock 복귀·Profiles 전환·설정 기반 최초 로그인·reload/logout/재로그인을 검증한다. Master password의 terminal echo 여부도 검사한다. Tree filter·layout 순수성·늦은 응답 폐기는 단위 테스트, background 조회/activity의 idle 경계는 synctest로 검증한다.

@@ -148,12 +148,16 @@ Daemon은 시작할 때 설정 경로를 확정하고 server/email/lock_timeout�
 
 `lock_timeout = "0s"`는 자동 잠금을 끈다. 양수면 login/unlock 완료부터 계산하고 성공한 read/list에서 갱신한다. Status·sync·reload·실패한 조회는 연장하지 않는다. Reload로 시간이 줄어 이미 만료됐다면 잠금 처리하고 요청 진입에서도 deadline을 검사한다. 만료 시 진행 작업 취소, 키·목록 index 파기를 수행하며 cache/keychain 로그인은 유지한다. 다음 대화형 read/list는 기존 자동 unlock 후 재개한다. Native keychain 호출은 진행 중 취소할 수 없어 실제 파기 완료가 늦어질 수 있다.
 
-실행 상태 확인:
+버전과 실행 상태 확인:
 
 ```sh
+bwb version
+bwb --version
 bwb daemon status
 bwb --profile personal status --verbose
 ```
+
+`version`과 `--version`은 현재 CLI 바이너리의 버전을 표시하며 config나 daemon 연결이 필요 없다. Go가 빌드 시 기록한 모듈 버전을 go-daemonkit의 `Options.Version`에도 전달한다. HEAD에 `vA.B.C` 태그가 있으면 해당 버전을 사용하고, 미커밋 변경은 `+dirty`, 태그 없는 커밋은 Go pseudo-version, 빌드 정보가 없으면 `dev`로 표시한다. 실행 시 Git을 호출하지 않는다. `daemon status`의 `VERSION`은 go-daemonkit이 조회한 실행 중 daemon의 버전이므로 CLI와 다를 수 있다.
 
 `daemon status`는 Ready인 daemon의 선택된 config 절대 경로를 표시한다(기본 파일이 없더라도 선택된 경로 표시). `status --verbose`는 적용 중인 서버·계정·lock_timeout과 UTC 잠금 예정 시각 `LOCK_AT`을 표시한다. 잠겼거나 자동 잠금이 꺼졌으면 예정 시각은 `-`다. Config 없는 legacy profile은 저장된 계정과 timeout 0s를 표시한다. 두 명령은 daemon을 자동 시작하거나 활동 시간을 연장하지 않는다. 기본 `status`의 한 줄 출력은 유지한다. TOML이 잘못된 경우에도 `daemon status`와 명시적 `--profile NAME status --verbose`로 현재 적용 상태를 확인할 수 있다.
 

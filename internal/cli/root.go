@@ -18,7 +18,13 @@ import (
 )
 
 func NewRoot() *cobra.Command {
-	root := &cobra.Command{Use: "bwb", Short: "Browse and read Bitwarden vaults through a local daemon", SilenceUsage: true, SilenceErrors: true}
+	root := &cobra.Command{Use: "bwb", Version: daemon.Options().Version, Short: "Browse and read Bitwarden vaults through a local daemon", SilenceUsage: true, SilenceErrors: true}
+	root.AddCommand(&cobra.Command{Use: "version", Short: "Show this binary's version without starting the daemon", Args: cobra.NoArgs,
+		PersistentPreRunE: func(*cobra.Command, []string) error { return nil },
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			_, err := fmt.Fprintf(cmd.OutOrStdout(), "bwb version %s\n", root.Version)
+			return err
+		}})
 	var profile string
 	var configPath string
 	root.PersistentFlags().StringVar(&configPath, "config", "", "Config file (overrides BWB_CONFIG)")
