@@ -49,7 +49,7 @@ func itemCommand(totp bool, profile *string, nonInteractive *bool) *cobra.Comman
 			input, inOK := cmd.InOrStdin().(*os.File)
 			output, outOK := cmd.OutOrStdout().(*os.File)
 			if inOK && outOK && term.IsTerminal(int(input.Fd())) && term.IsTerminal(int(output.Fd())) {
-				return tui.RunTOTP(cmd.Context(), *profile, args[0], client, input, output)
+				return tui.RunTOTP(cmd.Context(), *profile, args[0], client, connectContext, input, output)
 			}
 		}
 		req.Profile, req.Item = *profile, args[0]

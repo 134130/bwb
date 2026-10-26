@@ -57,10 +57,12 @@ func prepareConfig(cmd *cobra.Command, pathFlag string, profile *string, changed
 // Serialize the temporary environment override used only when spawning a daemon.
 var launchConfigMu sync.Mutex
 
-func connectCommand(cmd *cobra.Command) (*kit.Client, error) {
+func connectCommand(cmd *cobra.Command) (*kit.Client, error) { return connectContext(cmd.Context()) }
+
+func connectContext(ctx context.Context) (*kit.Client, error) {
 	launchConfigMu.Lock()
 	defer launchConfigMu.Unlock()
-	state, _ := cmd.Context().Value(configKey{}).(commandConfig)
+	state, _ := ctx.Value(configKey{}).(commandConfig)
 	if state.startupPath != "" {
 		previous, existed := os.LookupEnv("BWB_CONFIG")
 		if err := os.Setenv("BWB_CONFIG", state.startupPath); err != nil {
@@ -74,7 +76,7 @@ func connectCommand(cmd *cobra.Command) (*kit.Client, error) {
 			}
 		}()
 	}
-	return daemon.Connect(cmd.Context())
+	return daemon.Connect(ctx)
 }
 
 func configCommands() (*cobra.Command, *cobra.Command) {

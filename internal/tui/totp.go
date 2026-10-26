@@ -41,13 +41,13 @@ func (r *Root) openOTP(id string) tea.Cmd {
 	return r.refreshOTP(true)
 }
 func (r *Root) refreshOTP(authenticate bool) tea.Cmd {
-	profile, id := r.profile, r.otp.ID
+	profile, id, client, executor := r.profile, r.otp.ID, r.client, r.executor
 	return r.operation("otp", func(ctx context.Context) (any, error) {
 		req := vaultapi.TOTPRequest{Profile: profile, ID: id, Background: !authenticate}
 		if authenticate {
-			return r.executor.TOTP(ctx, req)
+			return executor.TOTP(ctx, req)
 		}
-		return r.client.Invoke(ctx, vaultapi.TOTP, req)
+		return client.Invoke(ctx, vaultapi.TOTP, req)
 	})
 }
 func (r *Root) closeOTP() {

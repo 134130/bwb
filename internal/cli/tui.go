@@ -24,6 +24,6 @@ func tuiCommand(profile *string, nonInteractive *bool) *cobra.Command {
 			return err
 		}
 		defer client.Close()
-		return tui.Run(cmd.Context(), *profile, client, input, output)
+		return tui.Run(cmd.Context(), *profile, client, connectContext, input, output)
 	}}
 }

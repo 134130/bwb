@@ -43,6 +43,7 @@ type authDialog struct {
 
 // Root alone stores terminal size. Every child receives content constraints.
 type Root struct {
+	connect       func(context.Context) (*kit.Client, error)
 	otp           *OTPPage
 	standaloneID  string
 	workKind      string
@@ -64,18 +65,20 @@ type Root struct {
 	lastActivity  time.Time
 }
 
-func Run(ctx context.Context, profile string, client *kit.Client, input io.Reader, output io.Writer) error {
-	return run(ctx, profile, "", client, input, output)
+func Run(ctx context.Context, profile string, client *kit.Client, connect func(context.Context) (*kit.Client, error), input io.Reader, output io.Writer) error {
+	return run(ctx, profile, "", client, connect, input, output)
 }
-func RunTOTP(ctx context.Context, profile, id string, client *kit.Client, input io.Reader, output io.Writer) error {
-	return run(ctx, profile, id, client, input, output)
+func RunTOTP(ctx context.Context, profile, id string, client *kit.Client, connect func(context.Context) (*kit.Client, error), input io.Reader, output io.Writer) error {
+	return run(ctx, profile, id, client, connect, input, output)
 }
-func run(ctx context.Context, profile, id string, client *kit.Client, input io.Reader, output io.Writer) error {
+func run(ctx context.Context, profile, id string, client *kit.Client, connect func(context.Context) (*kit.Client, error), input io.Reader, output io.Writer) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	root := &Root{ctx: ctx, client: client, profile: profile, page: "explorer", explorer: newExplorer()}
 	var program *tea.Program
+	root.connect = connect
 	root.standaloneID = id
+	defer func() { root.purge(); root.client.Close() }()
 	root.executor = vaultclient.Executor{Client: client, Prompt: func(ctx context.Context, request vaultclient.AuthPrompt) ([]byte, error) {
 		reply := make(chan []byte)
 		program.Send(promptMsg{ctx, request, reply})
@@ -91,7 +94,6 @@ func run(ctx context.Context, profile, id string, client *kit.Client, input io.R
 	}}
 	program = tea.NewProgram(root, tea.WithContext(ctx), tea.WithInput(input), tea.WithOutput(output))
 	_, err := program.Run()
-	root.purge()
 	return err
 }
 func tick() tea.Cmd {
@@ -119,7 +121,7 @@ func (r *Root) load() tea.Cmd {
 	return r.loadCatalog(false)
 }
 func (r *Root) loadCatalog(sync bool) tea.Cmd {
-	profile := r.profile
+	profile, executor := r.profile, r.executor
 	kind := "catalog"
 	if sync {
 		kind = "sync"
@@ -127,13 +129,13 @@ func (r *Root) loadCatalog(sync bool) tea.Cmd {
 	}
 	return r.operation(kind, func(ctx context.Context) (any, error) {
 		if sync {
-			if _, err := r.executor.Sync(ctx, vaultapi.ProfileRequest{Profile: profile}); err != nil {
+			if _, err := executor.Sync(ctx, vaultapi.ProfileRequest{Profile: profile}); err != nil {
 				return nil, err
 			}
 		}
 		catalog := map[string][]vaultapi.ListEntry{}
 		for _, kind := range []string{"organization", "collection", "folder", "item"} {
-			entries, err := r.executor.List(ctx, vaultapi.ListRequest{Profile: profile, Kind: kind, Background: true})
+			entries, err := executor.List(ctx, vaultapi.ListRequest{Profile: profile, Kind: kind, Background: true})
 			if err != nil {
 				return nil, err
 			}
@@ -143,13 +145,13 @@ func (r *Root) loadCatalog(sync bool) tea.Cmd {
 	})
 }
 func (r *Root) loadProfiles() tea.Cmd {
-	current := r.profile
+	current, client := r.profile, r.client
 	return r.operation("profiles", func(ctx context.Context) (any, error) {
-		result, err := r.client.Invoke(ctx, vaultapi.Profiles, vaultapi.Empty{})
+		result, err := client.Invoke(ctx, vaultapi.Profiles, vaultapi.Empty{})
 		if err != nil {
 			return nil, err
 		}
-		daemon, err := r.client.Invoke(ctx, vaultapi.DaemonStatus, vaultapi.Empty{})
+		daemon, err := client.Invoke(ctx, vaultapi.DaemonStatus, vaultapi.Empty{})
 		if err != nil {
 			return nil, err
 		}
@@ -167,7 +169,7 @@ func (r *Root) loadProfiles() tea.Cmd {
 		slices.Sort(names)
 		names = slices.Compact(names)
 		for _, name := range names {
-			state, err := r.client.Invoke(ctx, vaultapi.Status, vaultapi.ProfileRequest{Profile: name})
+			state, err := client.Invoke(ctx, vaultapi.Status, vaultapi.ProfileRequest{Profile: name})
 			if err != nil {
 				return nil, err
 			}
@@ -186,11 +188,11 @@ func (r *Root) loadProfiles() tea.Cmd {
 	})
 }
 func (r *Root) poll() tea.Cmd {
-	epoch, profile := r.epoch, r.profile
+	epoch, profile, client := r.epoch, r.profile, r.client
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(r.ctx, 3*time.Second)
 		defer cancel()
-		status, err := r.client.Invoke(ctx, vaultapi.Status, vaultapi.ProfileRequest{Profile: profile})
+		status, err := client.Invoke(ctx, vaultapi.Status, vaultapi.ProfileRequest{Profile: profile})
 		return statusMsg{epoch, status, err}
 	}
 }
@@ -202,6 +204,8 @@ func (r *Root) purge() {
 	r.epoch++
 	r.busy = false
 	r.otp = nil
+	r.help = false
+	r.confirmLogout = ""
 	if r.auth != nil {
 		r.auth.Input.SetValue("")
 		select {
@@ -212,6 +216,9 @@ func (r *Root) purge() {
 	}
 	// Preserve opaque navigation IDs, never labels, queries or secret values.
 	key, offset, collapsed := r.explorer.Tree.key(), r.explorer.Tree.Offset, r.explorer.Tree.collapsed
+	if key == "" {
+		key, offset = r.explorer.Tree.savedKey, r.explorer.Tree.savedOffset
+	}
 	r.explorer = newExplorer()
 	r.explorer.Tree.savedKey = key
 	r.explorer.Tree.savedOffset = offset
@@ -224,16 +231,17 @@ func (r *Root) describe() tea.Cmd {
 	if n == nil || n.Item == nil {
 		return nil
 	}
-	profile, id := r.profile, n.Item.ID
+	profile, id, executor := r.profile, n.Item.ID, r.executor
 	return r.operation("describe", func(ctx context.Context) (any, error) {
-		return r.executor.Describe(ctx, vaultapi.DescribeRequest{Profile: profile, ID: id})
+		return executor.Describe(ctx, vaultapi.DescribeRequest{Profile: profile, ID: id})
 	})
 }
 func (r *Root) lock(profile string) tea.Cmd {
+	client := r.client
 	r.purge()
 	r.state.State = "locked"
 	return r.operation("locked", func(ctx context.Context) (any, error) {
-		return r.client.Invoke(ctx, vaultapi.Lock, vaultapi.ProfileRequest{Profile: profile})
+		return client.Invoke(ctx, vaultapi.Lock, vaultapi.ProfileRequest{Profile: profile})
 	})
 }
 func (r *Root) activity() tea.Cmd {
@@ -241,15 +249,16 @@ func (r *Root) activity() tea.Cmd {
 		return nil
 	}
 	r.lastActivity = time.Now()
-	epoch, profile := r.epoch, r.profile
+	epoch, profile, client := r.epoch, r.profile, r.client
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(r.ctx, 3*time.Second)
 		defer cancel()
-		_, err := r.client.Invoke(ctx, vaultapi.Activity, vaultapi.ProfileRequest{Profile: profile})
+		_, err := client.Invoke(ctx, vaultapi.Activity, vaultapi.ProfileRequest{Profile: profile})
 		return resultMsg{Epoch: epoch, Kind: "activity", Err: err}
 	}
 }
 func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	client, executor := r.client, r.executor
 	size := r.contentSize()
 	switch m := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -280,7 +289,10 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.Err != nil {
 			r.purge()
 			r.state.State = "disconnected"
-			r.message = "Daemon disconnected; quit and reopen TUI"
+			r.message = "Daemon disconnected · Enter to reconnect"
+			if r.client != nil {
+				r.client.Close()
+			}
 			return r, nil
 		}
 		old := r.state.State
@@ -315,6 +327,13 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return r, nil
 	case resultMsg:
+		if connection, ok := m.Value.(*connected); ok {
+			connection.stopCleanup()
+			if m.Epoch != r.epoch || r.ctx.Err() != nil {
+				connection.client.Close()
+				return r, nil
+			}
+		}
 		if m.Epoch != r.epoch {
 			return r, nil
 		}
@@ -341,6 +360,18 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return r, nil
 		}
 		switch m.Kind {
+		case "connected":
+			connection := m.Value.(*connected)
+			if r.client != nil {
+				r.client.Close()
+			}
+			r.client = connection.client
+			r.executor.Client = connection.client
+			r.state = vaultapi.StatusResponse{}
+			if r.page == "profiles" {
+				return r, r.loadProfiles()
+			}
+			return r, r.load()
 		case "otp":
 			r.epoch++
 			if r.otp != nil {
@@ -406,13 +437,28 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		profile := r.profile
 		return r, r.operation("read", func(ctx context.Context) (any, error) {
-			return r.executor.Read(ctx, vaultapi.ReadRequest{Profile: profile, ID: m.ID, Field: m.Field})
+			return executor.Read(ctx, vaultapi.ReadRequest{Profile: profile, ID: m.ID, Field: m.Field})
 		})
 	case tea.KeyPressMsg:
 		key := m.String()
 		if key == "ctrl+c" {
 			r.purge()
 			return r, tea.Quit
+		}
+		if r.state.State == "disconnected" {
+			switch key {
+			case "q":
+				r.purge()
+				return r, tea.Quit
+			case "enter":
+				if !r.busy {
+					return r, r.reconnect()
+				}
+			case "esc", "ctrl+l":
+				r.purge()
+				r.message = "Daemon disconnected · Enter to reconnect"
+			}
+			return r, nil
 		}
 		if key == "ctrl+l" {
 			return r, r.lock(r.profile)
@@ -474,7 +520,7 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if key == "y" {
 				r.purge()
 				return r, r.operation("logout", func(ctx context.Context) (any, error) {
-					return r.client.Invoke(ctx, vaultapi.Logout, vaultapi.ProfileRequest{Profile: name})
+					return client.Invoke(ctx, vaultapi.Logout, vaultapi.ProfileRequest{Profile: name})
 				})
 			}
 			return r, nil
@@ -534,7 +580,7 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return r, nil
 				case "r":
 					r.explorer.Detail.clearValue()
-					return r, r.operation("reload", func(ctx context.Context) (any, error) { return r.client.Invoke(ctx, vaultapi.Reload, vaultapi.Empty{}) })
+					return r, r.operation("reload", func(ctx context.Context) (any, error) { return client.Invoke(ctx, vaultapi.Reload, vaultapi.Empty{}) })
 				}
 			}
 			return r, r.profiles.Update(msg, size)
@@ -611,6 +657,16 @@ func (r *Root) View() tea.View {
 	}
 	if r.confirmLogout != "" {
 		body = "Remove saved authentication for " + safe(r.confirmLogout) + "? [y/N]"
+	}
+	if r.state.State == "disconnected" {
+		body = "Daemon disconnected · Enter to reconnect"
+		if r.busy {
+			body = "Connecting… · Esc cancels"
+		}
+		footer = "Enter reconnect · q quit"
+		if r.message != "" {
+			footer = r.message
+		}
 	}
 	if r.auth != nil {
 		p := r.auth.Prompt.Request
