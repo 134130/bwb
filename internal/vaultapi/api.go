@@ -6,6 +6,9 @@ import (
 	daemon "github.com/134130/go-daemonkit"
 )
 
+type TOTPRequest = vault.TOTPRequest
+type TOTPResponse = vault.TOTPResponse
+
 type ListRequest = vault.ListRequest
 type ListResponse = vault.ListResponse
 type ListEntry = vault.ListEntry
@@ -51,6 +54,7 @@ type AuthWatchResponse = vault.AuthWatchResponse
 const AuthTimeout = vault.AuthTimeout
 
 var (
+	TOTP         = daemon.NewMethod[TOTPRequest, TOTPResponse]("vault.totp")
 	Describe     = daemon.NewMethod[DescribeRequest, DescribeResponse]("vault.describe")
 	Profiles     = daemon.NewMethod[Empty, ProfilesResponse]("vault.profiles")
 	Activity     = daemon.NewMethod[ProfileRequest, Empty]("vault.activity")

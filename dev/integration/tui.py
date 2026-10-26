@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Drive the real Explorer through a PTY; assert the rendered screen, not stale output."""
 import errno
+import re
+import hmac
+import hashlib
 import fcntl
 import os
 import pty
@@ -19,9 +22,10 @@ def main():
     binary, scenario, *args = sys.argv[1:]
     password = os.environ['BWB_TEST_PASSWORD']
     secret = 'DEMO-only-password-1!'
+    # pyte lacks xterm CSI S/T scrolling; advertise its supported VT100 capabilities.
     pid, fd = pty.fork()
     if pid == 0:
-        os.execve(binary, [binary, *args], {**os.environ, 'TERM': 'xterm-256color'})
+        os.execve(binary, [binary, *args], {**os.environ, 'TERM': 'vt100'})
     screen = pyte.Screen(120, 34)
     stream = pyte.ByteStream(screen)
     output = bytearray()
@@ -51,8 +55,8 @@ def main():
             if child:
                 status = os.waitstatus_to_exitcode(code)
 
-    def until(predicate):
-        deadline = time.monotonic() + 15
+    def until(predicate, timeout=15):
+        deadline = time.monotonic() + timeout
         while not predicate():
             assert status is None, f'TUI exited: {status}'
             assert time.monotonic() < deadline, 'TUI timed out: ' + view().replace(password, '[password]').replace(secret, '[secret]')
@@ -75,6 +79,28 @@ def main():
             send('q')
         else:
             send(password + '\r')
+            if scenario == 'otp':
+                until(lambda: 'seconds remaining' in view())
+                def shown_code():
+                    return re.search(r'(?m)^([0-9]{6}) *$', view())
+                until(lambda: shown_code() is not None)
+                initial = shown_code().group(1)
+                def expected_code(step):
+                    digest = hmac.new(b'12345678901234567890', struct.pack('>Q', step), hashlib.sha1).digest()
+                    offset = digest[-1] & 15
+                    return f'{(int.from_bytes(digest[offset:offset+4], "big") & 0x7fffffff) % 1000000:06d}'
+                step = int(time.time()) // 30
+                assert initial in [expected_code(step-1), expected_code(step), expected_code(step+1)]
+                assert 'GEZDGNBV' not in view()
+                until(lambda: shown_code() is not None and shown_code().group(1) != initial, timeout=35)
+                subprocess.run([binary, 'lock'], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                until(lambda: 'Vault locked' in view())
+                assert shown_code() is None
+                send('q')
+                until(lambda: status is not None)
+                assert status == 0 and password.encode() not in output
+                print('PASS: TOTP authentication, generation, rollover and lock purge')
+                return
             until(lambda: 'GitHub (demo)' in view())
             assert secret not in view()
             if scenario == 'login':
@@ -96,6 +122,29 @@ def main():
                 assert status == 0 and password.encode() not in output
                 print('PASS: TUI configured login, reload and logout')
                 return
+            send('/OTP')
+            pause()
+            send('\r')
+            pause()
+            for _ in range(12):
+                if any('>' in line[:60] and 'OTP (public' in line[:60] for line in screen.display):
+                    break
+                send('\x1b[B')
+                pause()
+            send('\r')
+            until(lambda: 'Authentication code' in view())
+            for _ in range(10):
+                if any('> Authentication code' in line[60:] for line in screen.display):
+                    break
+                send('\x1b[B')
+                pause()
+            send('\r')
+            until(lambda: 'seconds remaining' in view())
+            assert 'GEZDGNBV' not in view()
+            send('q')
+            until(lambda: 'Enter reveals selected field' in view())
+            send('\t\x1b')
+            pause()
             send('/GitHub')
             until(lambda: 'GitHub' in screen.display[2])
             pause()
@@ -124,7 +173,7 @@ def main():
             pause()
             until(lambda: 'Working' not in view() and 'Enter reveals selected field' in view())
             assert 'GitHub' in screen.display[2]
-            assert any('>' in line[:60] and 'GitHub (demo)' in line[:60] for line in screen.display)
+            until(lambda: any('>' in line[:60] and 'GitHub (demo)' in line[:60] for line in screen.display))
             # Refresh resets field selection; explicitly select password again.
             for _ in range(10):
                 if any('> Password ' in line[60:] for line in screen.display):

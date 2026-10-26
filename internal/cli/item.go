@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/134130/bwb/internal/tui"
+	"golang.org/x/term"
 	"io"
+	"os"
 	"strings"
 	"text/tabwriter"
 
@@ -40,6 +43,13 @@ func itemCommand(totp bool, profile *string, nonInteractive *bool) *cobra.Comman
 		if syncFirst {
 			if _, err := execution.Sync(cmd.Context(), vaultapi.ProfileRequest{Profile: *profile}); err != nil {
 				return err
+			}
+		}
+		if totp && format == "text" && !*nonInteractive {
+			input, inOK := cmd.InOrStdin().(*os.File)
+			output, outOK := cmd.OutOrStdout().(*os.File)
+			if inOK && outOK && term.IsTerminal(int(input.Fd())) && term.IsTerminal(int(output.Fd())) {
+				return tui.RunTOTP(cmd.Context(), *profile, args[0], client, input, output)
 			}
 		}
 		req.Profile, req.Item = *profile, args[0]

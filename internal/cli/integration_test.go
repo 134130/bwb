@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -164,6 +165,11 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	must(manifest.Password+"\n", "", login...)
 	must("", "", "daemon", "update")
 	must("", "unlocked\n", "status")
+	otpID := manifest.Items["20000000-0000-4000-8000-000000000009"]
+	if code, err := run("", "--non-interactive", "totp", otpID); err != nil || !regexp.MustCompile("^[0-9]{6}$").MatchString(code) {
+		t.Fatal("one-shot TOTP", err)
+	}
+
 	must("", "logged_out\n", "--profile", "other", "status")
 	list := func(kind string, flags ...string) []vaultapi.ListEntry {
 		t.Helper()
@@ -404,6 +410,8 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	must("", "", "lock")
 	tuiTerminal("cancel")
 	tuiTerminal("explorer")
+	must("", "", "lock")
+	tuiTerminal("otp", "totp", otpID)
 	must("", "", "lock")
 	terminal("no_prompt", "", "--non-interactive", "item", "list")
 	terminal("no_prompt", "", "--non-interactive", "item", "read", id, "--field", "password")

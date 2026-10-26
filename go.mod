@@ -7,6 +7,7 @@ require (
 	charm.land/bubbletea/v2 v2.1.0
 	charm.land/lipgloss/v2 v2.0.6
 	github.com/134130/go-daemonkit v0.0.0-20261024090218-d756ef3418d7
+	github.com/atotto/clipboard v0.1.4
 	github.com/awnumar/memguard v0.23.0
 	github.com/charmbracelet/x/ansi v0.11.9
 	github.com/google/uuid v1.6.0
@@ -18,7 +19,6 @@ require (
 
 require (
 	github.com/Microsoft/go-winio v0.6.4 // indirect
-	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/awnumar/memcall v0.4.0 // indirect
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
 	github.com/charmbracelet/ultraviolet v0.0.0-20261008173134-6b8d4baf91b4 // indirect

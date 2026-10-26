@@ -184,3 +184,16 @@ bwb --profile personal tui
 검색·탐색 같은 실제 사용자 조작은 최대 초당 한 번 Activity RPC로 idle 시간을 갱신한다. 백그라운드 목록·필드 이름 조회와 상태 polling은 시간을 연장하지 않는다. 비밀 필드 조회는 CLI와 같은 기존 활동 정책을 따른다. CLI에서는 상세에 표시된 `url/1` 같은 키로 URL을 읽는다.
 
 Profiles는 TOML에 정의된 profile과 SQLite에 저장된 로그인 profile을 함께 보여준다. 파일 값과 적용값을 비교하고 파일 오류를 표시하며, 파일 오류 중에도 잠금·logout이 가능하다. 편집·클립보드 복사·자동 sync는 아직 제공하지 않는다.
+
+
+### TOTP
+
+`bwb item totp ITEM` (또는 `bwb totp ITEM`)는 stdin·stdout이 모두 터미널이면 코드와 남은 시간을 표시하고 만료 시 자동 갱신한다. `y`는 표시 중인 현재 코드를 즉시 복사하며 만료 임박 여부로 기다리지 않는다. `q`/Esc는 닫기, Ctrl+C는 종료, Ctrl+L은 잠금이다.
+
+파이프·리다이렉션 또는 `--non-interactive`에서는 현재 코드 한 개만 stdout에 출력한다. 최소 유효시간 대기는 없으므로 만료 직전 코드가 나올 수 있다.
+
+TUI 상세의 `Authentication code`를 Enter로 열면 같은 화면을 사용하며 `q`로 상세에 돌아온다. `TOTP setup key`는 시드 원문을 명시적으로 여는 별도 필드다. 기존 `item read ITEM --field totp-secret`도 시드 원문 조회를 유지한다.
+
+코드 생성은 daemon에서 수행한다. 화면에는 코드·만료시각만 전달하며 자동 갱신은 idle 시간을 연장하지 않는다. 잠금·연결 종료 시 코드를 제거한다. OS 클립보드에 복사한 값은 자동 갱신·삭제하지 않는다. macOS는 pbcopy, Linux는 설치된 클립보드 도구와 그래픽 세션이 필요하며 지원되지 않으면 오류를 표시한다.
+
+Base32 시드 및 표준 `otpauth://totp` URI, SHA1/SHA256/SHA512, 6·8자리와 1–86400초 주기를 지원한다. HOTP·Steam 형식은 명시적 오류다. 생성 시각은 daemon의 시스템 시계를 따른다.

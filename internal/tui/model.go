@@ -10,10 +10,12 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/134130/bwb/internal/bitwarden"
 	"github.com/134130/bwb/internal/config"
 	"github.com/134130/bwb/internal/vaultapi"
 	"github.com/134130/bwb/internal/vaultclient"
 	kit "github.com/134130/go-daemonkit"
+	"github.com/atotto/clipboard"
 )
 
 type tickMsg time.Time
@@ -41,6 +43,8 @@ type authDialog struct {
 
 // Root alone stores terminal size. Every child receives content constraints.
 type Root struct {
+	otp           *OTPPage
+	standaloneID  string
 	workKind      string
 	ctx           context.Context
 	client        *kit.Client
@@ -61,10 +65,17 @@ type Root struct {
 }
 
 func Run(ctx context.Context, profile string, client *kit.Client, input io.Reader, output io.Writer) error {
+	return run(ctx, profile, "", client, input, output)
+}
+func RunTOTP(ctx context.Context, profile, id string, client *kit.Client, input io.Reader, output io.Writer) error {
+	return run(ctx, profile, id, client, input, output)
+}
+func run(ctx context.Context, profile, id string, client *kit.Client, input io.Reader, output io.Writer) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	root := &Root{ctx: ctx, client: client, profile: profile, page: "explorer", explorer: newExplorer()}
 	var program *tea.Program
+	root.standaloneID = id
 	root.executor = vaultclient.Executor{Client: client, Prompt: func(ctx context.Context, request vaultclient.AuthPrompt) ([]byte, error) {
 		reply := make(chan []byte)
 		program.Send(promptMsg{ctx, request, reply})
@@ -101,7 +112,12 @@ func (r *Root) operation(kind string, call func(context.Context) (any, error)) t
 	r.message = ""
 	return func() tea.Msg { defer cancel(); value, err := call(ctx); return resultMsg{epoch, kind, value, err} }
 }
-func (r *Root) load() tea.Cmd { return r.loadCatalog(false) }
+func (r *Root) load() tea.Cmd {
+	if r.standaloneID != "" {
+		return r.openOTP(r.standaloneID)
+	}
+	return r.loadCatalog(false)
+}
 func (r *Root) loadCatalog(sync bool) tea.Cmd {
 	profile := r.profile
 	kind := "catalog"
@@ -185,6 +201,7 @@ func (r *Root) purge() {
 	}
 	r.epoch++
 	r.busy = false
+	r.otp = nil
 	if r.auth != nil {
 		r.auth.Input.SetValue("")
 		select {
@@ -248,6 +265,13 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if r.state.State == "disconnected" {
 			return r, tick()
 		}
+		if r.otp != nil {
+			r.otp.Update(m, size)
+			if !r.busy && !r.otp.Stopped && !r.otp.Now.Before(r.otp.Code.ExpiresAt) {
+				cmd := r.refreshOTP(false)
+				return r, tea.Batch(tick(), cmd, r.poll())
+			}
+		}
 		return r, tea.Batch(tick(), r.poll())
 	case statusMsg:
 		if m.Epoch != r.epoch {
@@ -306,12 +330,25 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !errors.Is(m.Err, context.Canceled) {
 				r.message = safe(m.Err.Error())
 			}
+			if m.Kind == "otp" && r.otp != nil {
+				r.otp.Code = vaultapi.TOTPResponse{}
+				r.otp.Message = r.message
+				r.otp.Stopped = true
+			}
 			if m.Kind == "describe" {
 				r.explorer.Detail.Error = r.message
 			}
 			return r, nil
 		}
 		switch m.Kind {
+		case "otp":
+			r.epoch++
+			if r.otp != nil {
+				r.otp.Code = m.Value.(vaultapi.TOTPResponse)
+				r.otp.Now = time.Now()
+				r.otp.Stopped = false
+				r.state.State = "unlocked"
+			}
 		case "catalog", "sync":
 			r.epoch++ // Discard status polls begun before authentication completed.
 			r.state.State = "unlocked"
@@ -332,7 +369,14 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return r, r.describe()
 		case "describe":
-			r.explorer.Detail.Fields = m.Value.(vaultapi.DescribeResponse).Fields
+			r.explorer.Detail.Fields = nil
+			for _, f := range m.Value.(vaultapi.DescribeResponse).Fields {
+				if f.Path == "login/totp" {
+					r.explorer.Detail.Fields = append(r.explorer.Detail.Fields, bitwarden.FieldInfo{Path: "totp", Label: "Authentication code"})
+					f.Label = "TOTP setup key"
+				}
+				r.explorer.Detail.Fields = append(r.explorer.Detail.Fields, f)
+			}
 			r.explorer.Update(LayoutMsg{}, size)
 		case "read":
 			r.explorer.Detail.Value = m.Value.(vaultapi.ReadResponse).Value
@@ -350,12 +394,15 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return r, nil
 	case revealMsg:
-		if r.busy && r.workKind == "sync" {
+		if r.otp != nil || r.busy && r.workKind == "sync" {
 			return r, nil
 		}
 		n := r.explorer.Tree.current()
 		if n == nil || n.Item == nil || n.Item.ID != m.ID || r.explorer.Focus != "detail" || len(r.explorer.Detail.Fields) == 0 || r.explorer.Detail.Fields[r.explorer.Detail.Index].Path != m.Field {
 			return r, nil
+		}
+		if m.Field == "totp" {
+			return r, r.openOTP(m.ID)
 		}
 		profile := r.profile
 		return r, r.operation("read", func(ctx context.Context) (any, error) {
@@ -393,6 +440,33 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return r, nil
 			}
 			return r, r.auth.Input.Update(msg, Size{size.Width, 1})
+		}
+		if r.standaloneID != "" && r.otp == nil {
+			if key == "q" || key == "esc" {
+				r.purge()
+				return r, tea.Quit
+			}
+			if key == "enter" && !r.busy {
+				return r, r.load()
+			}
+			return r, nil
+		}
+		if r.otp != nil {
+			switch key {
+			case "q", "esc":
+				r.closeOTP()
+				if r.standaloneID != "" {
+					return r, tea.Quit
+				}
+			case "y":
+				r.copyOTP(clipboard.WriteAll)
+				return r, r.activity()
+			case "enter":
+				if r.otp.Stopped {
+					return r, r.openOTP(r.otp.ID)
+				}
+			}
+			return r, nil
 		}
 		if r.confirmLogout != "" {
 			name := r.confirmLogout
@@ -511,6 +585,9 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 func (r *Root) View() tea.View {
 	title := fmt.Sprintf("bwb · %s    Explorer / Profiles [Ctrl+P]    %s", safe(r.profile), safe(r.state.State))
+	if r.standaloneID != "" {
+		title = fmt.Sprintf("bwb · %s · TOTP · %s", safe(r.profile), safe(r.state.State))
+	}
 	footer := "/ search  ←→ tree  Tab pane  Enter open  s sort  r sync  Ctrl+L lock  ? help  q quit"
 	body := "Vault locked · Enter to login/unlock"
 	size := r.contentSize()
@@ -527,6 +604,10 @@ func (r *Root) View() tea.View {
 	}
 	if r.help {
 		body = "Explorer: / fuzzy search; directory matches include descendants.\nEnter/Esc leave search editing; Esc again restores the original tree.\nArrows or hjkl navigate; Tab changes pane; s reverses name order.\nExplorer: r syncs and refreshes, preserving search and tree position.\nEnter on a field reveals it; Enter hides it; PgUp/PgDown scroll value.\nCtrl+P opens Profiles; u authenticates; l locks; x logs out; r reloads.\nUser navigation renews idle time; polling does not.\nq quits without locking the daemon; Ctrl+L locks.\n? closes help."
+	}
+	if r.otp != nil {
+		body = r.otp.View(size)
+		footer = "y copy · q close · Ctrl+L lock"
 	}
 	if r.confirmLogout != "" {
 		body = "Remove saved authentication for " + safe(r.confirmLogout) + "? [y/N]"

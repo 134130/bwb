@@ -145,3 +145,7 @@ func (e Executor) List(ctx context.Context, req vaultapi.ListRequest) ([]vaultap
 func (e Executor) Describe(ctx context.Context, req vaultapi.DescribeRequest) (vaultapi.DescribeResponse, error) {
 	return execute(ctx, func() (vaultapi.DescribeResponse, error) { return e.Client.Invoke(ctx, vaultapi.Describe, req) }, func(err error) error { return e.authenticate(ctx, req.Profile, err) })
 }
+
+func (e Executor) TOTP(ctx context.Context, req vaultapi.TOTPRequest) (vaultapi.TOTPResponse, error) {
+	return execute(ctx, func() (vaultapi.TOTPResponse, error) { return e.Client.Invoke(ctx, vaultapi.TOTP, req) }, func(err error) error { return e.authenticate(ctx, req.Profile, err) })
+}

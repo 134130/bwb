@@ -209,6 +209,7 @@ func NewRoot() *cobra.Command {
 		return prepareConfig(cmd, configPath, &profile, root.PersistentFlags().Changed("profile"))
 	}
 	configuration, profiles := configCommands()
+	root.AddCommand(itemCommand(true, &profile, &nonInteractive))
 	root.AddCommand(configuration, profiles, tuiCommand(&profile, &nonInteractive))
 	root.AddCommand(login, unlock, logout, sync, lock, status, control)
 	return root
