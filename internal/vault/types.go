@@ -1,5 +1,7 @@
 package vault
 
+import "github.com/134130/bwb/internal/bitwarden"
+
 type ProfileRequest struct {
 	Profile string `json:"profile"`
 }
@@ -9,6 +11,10 @@ type LoginRequest struct {
 	Email    string `json:"email"`
 	Password []byte `json:"password"`
 	AuthID   string `json:"authId,omitempty"`
+}
+type LoginAPIKeyRequest struct {
+	LoginRequest
+	bitwarden.APIKey
 }
 type UnlockRequest struct {
 	Profile  string `json:"profile"`

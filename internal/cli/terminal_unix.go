@@ -40,7 +40,11 @@ func readTerminalPassword(ctx context.Context, tty *os.File, fd int, request aut
 			password = nil
 		}
 	}()
-	if _, err := fmt.Fprintf(tty, "%s %q (%q at %q)\r\nPassword: ", request.Action, request.Profile, request.Email, request.Server); err != nil {
+	label := request.Label
+	if label == "" {
+		label = "Password"
+	}
+	if _, err := fmt.Fprintf(tty, "%s %q (%q at %q)\r\n%s: ", request.Action, request.Profile, request.Email, request.Server, label); err != nil {
 		return nil, err
 	}
 	buffer := make([]byte, 4096)

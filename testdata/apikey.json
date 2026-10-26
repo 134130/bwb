@@ -1,0 +1,26 @@
+{
+  "email": "bwb-integration@example.invalid",
+  "password": "PUBLIC-INTEGRATION-ONLY-not-a-real-password!",
+  "clientId": "user.10000000-0000-4000-8000-000000000001",
+  "clientSecret": "PUBLIC-TEST-API-KEY",
+  "token": {
+    "access_token": "test-access",
+    "Key": "2.mDQrCTbo5ijo9bldh+/fWg==|EB0uICIy/14ZcO4sRECWGC7GwCl1w9Chwhh4B6oEyj/VSwkFNWXsw/xQE2OaeHBISdbe8rdhatmONthznhvVITu3yLboEGXzDmUhoHFSg/Y=|VF6I6NxeReAIBKGaeYJG7CLh2Z+mJsozvt0GF2khzXo=",
+    "Kdf": 0,
+    "KdfIterations": 600000
+  },
+  "sync": {
+    "profile": {
+      "id": "10000000-0000-4000-8000-000000000001",
+      "email": "bwb-integration@example.invalid",
+      "key": "2.mDQrCTbo5ijo9bldh+/fWg==|EB0uICIy/14ZcO4sRECWGC7GwCl1w9Chwhh4B6oEyj/VSwkFNWXsw/xQE2OaeHBISdbe8rdhatmONthznhvVITu3yLboEGXzDmUhoHFSg/Y=|VF6I6NxeReAIBKGaeYJG7CLh2Z+mJsozvt0GF2khzXo="
+    },
+    "folders": [
+      {
+        "id": "40000000-0000-4000-8000-000000000001",
+        "name": "2.IszQ0FzRzBWDAOejsSBi+A==|4+rcprEbEyf0LuWBA5DXbtFF4UO9mZLGtrAtp4rT8ds=|0ZLAe5TydqzQB4G67p2iOmAKKrU3BbDQwV8aO9xAME0="
+      }
+    ],
+    "ciphers": []
+  }
+}

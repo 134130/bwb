@@ -138,7 +138,7 @@ func TestConfigReloadBindingAndLogout(t *testing.T) {
 		t.Fatal("policy not applied")
 	}
 	cache := &bitwarden.Cache{Version: 1, Server: policy.Server, Email: policy.Email}
-	if err := s.saveLogin(ctx, saved, cache, []byte("token")); err != nil {
+	if err := s.saveLogin(ctx, saved, cache, credential{Token: []byte("token")}); err != nil {
 		t.Fatal(err)
 	}
 	policy.Email = "different@example.invalid"
@@ -229,7 +229,7 @@ func TestReloadIsAtomicAndCancellationLeavesPolicyUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.saveLogin(ctx, saved, &bitwarden.Cache{Version: 1, Server: policy.Server, Email: policy.Email}, []byte("token")); err != nil {
+	if err := s.saveLogin(ctx, saved, &bitwarden.Cache{Version: 1, Server: policy.Server, Email: policy.Email}, credential{Token: []byte("token")}); err != nil {
 		t.Fatal(err)
 	}
 	shorter := policy
@@ -289,7 +289,7 @@ func TestStatusReportsAppliedPolicyWithoutRenewingDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.saveLogin(t.Context(), saved, &bitwarden.Cache{Version: 1, Server: policy.Server, Email: policy.Email}, []byte("token")); err != nil {
+	if err := s.saveLogin(t.Context(), saved, &bitwarden.Cache{Version: 1, Server: policy.Server, Email: policy.Email}, credential{Token: []byte("token")}); err != nil {
 		t.Fatal(err)
 	}
 	p := idleProfile(t, s, "default", "15m")

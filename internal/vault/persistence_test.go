@@ -22,9 +22,17 @@ type faultyCredentials struct {
 	values            map[string][]byte
 	setErr, deleteErr error
 	afterSet          func()
+	beforeGet         func()
+	getErr            error
 }
 
 func (f *faultyCredentials) Get(_ context.Context, key string) ([]byte, error) {
+	if f.beforeGet != nil {
+		f.beforeGet()
+	}
+	if f.getErr != nil {
+		return nil, f.getErr
+	}
 	v, ok := f.values[key]
 	if !ok {
 		return nil, secrets.ErrNotFound
@@ -97,12 +105,12 @@ func TestCredentialJournalAndLogoutFailure(t *testing.T) {
 	ctx := context.Background()
 	r, _ := s.load(ctx, "default")
 	cache := &bitwarden.Cache{Version: 1, Server: "https://example.invalid", Email: "test@example.invalid"}
-	if err := s.saveLogin(ctx, r, cache, []byte("old")); err != nil {
+	if err := s.saveLogin(ctx, r, cache, credential{Token: []byte("old")}); err != nil {
 		t.Fatal(err)
 	}
 	old := r.Credential
 	f.setErr = secrets.ErrAccess
-	if err := s.saveLogin(ctx, r, cache, []byte("replacement")); !errors.Is(err, secrets.ErrAccess) {
+	if err := s.saveLogin(ctx, r, cache, credential{Token: []byte("replacement")}); !errors.Is(err, secrets.ErrAccess) {
 		t.Fatal(err)
 	}
 	// Simulate process loss: only the durable record and native store survive.
@@ -114,13 +122,13 @@ func TestCredentialJournalAndLogoutFailure(t *testing.T) {
 	if saved.Credential != old || len(saved.Garbage) != 1 || len(f.values) != 2 {
 		t.Fatal("uncertain write lost recovery information")
 	}
-	token, err := recovered.token(ctx, saved)
-	if err != nil || string(token) != "old" {
+	token, err := recovered.loadCredential(ctx, saved)
+	if err != nil || string(token.Token) != "old" {
 		t.Fatal("failed login replaced valid credential", err)
 	}
-	clear(token)
+	token.clear()
 	f.setErr = nil
-	if err := recovered.saveLogin(ctx, saved, cache, []byte("new")); err != nil {
+	if err := recovered.saveLogin(ctx, saved, cache, credential{Token: []byte("new")}); err != nil {
 		t.Fatal(err)
 	}
 	if len(f.values) != 2 || len(saved.Garbage) != 1 || saved.Garbage[0] != old {
@@ -158,7 +166,7 @@ func TestCacheChunksAndIdentityBinding(t *testing.T) {
 	ctx := context.Background()
 	r, _ := s.load(ctx, "a")
 	cache := &bitwarden.Cache{Version: 1, DeviceID: strings.Repeat("x", 2*chunkSize), Server: "https://example.invalid", Email: "a@example.invalid"}
-	if err := s.saveLogin(ctx, r, cache, []byte("token")); err != nil {
+	if err := s.saveLogin(ctx, r, cache, credential{Token: []byte("token")}); err != nil {
 		t.Fatal(err)
 	}
 	reloaded, err := s.load(ctx, "a")
@@ -173,7 +181,7 @@ func TestCacheChunksAndIdentityBinding(t *testing.T) {
 		t.Fatal("cross-profile record accepted")
 	}
 	reloaded.Cache.Email = "b@example.invalid"
-	if _, err := s.token(ctx, reloaded); err == nil {
+	if _, err := s.loadCredential(ctx, reloaded); err == nil {
 		t.Fatal("credential identity mismatch accepted")
 	}
 	if len(f.values) != 1 {
@@ -198,7 +206,7 @@ func TestCanceledCommitLeavesRecoverableCredentialIntent(t *testing.T) {
 	}
 	f.afterSet = cancel
 	cache := &bitwarden.Cache{Version: 1, Server: "https://example.invalid", Email: "user@example.invalid"}
-	if err := s.saveLogin(ctx, r, cache, []byte("temporary")); !errors.Is(err, context.Canceled) {
+	if err := s.saveLogin(ctx, r, cache, credential{Token: []byte("temporary")}); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
 	saved, err := s.load(context.Background(), "default")
@@ -225,7 +233,7 @@ func TestStaleMemorySessionCannotOverwriteCommittedCredential(t *testing.T) {
 		t.Fatal(err)
 	}
 	cache := &bitwarden.Cache{Version: 1, Server: "https://example.invalid", Email: "user@example.invalid"}
-	if err := s.saveLogin(ctx, r, cache, []byte("old")); err != nil {
+	if err := s.saveLogin(ctx, r, cache, credential{Token: []byte("old")}); err != nil {
 		t.Fatal(err)
 	}
 	_, p, done, err := s.begin(ctx, "default", true)
@@ -236,18 +244,18 @@ func TestStaleMemorySessionCannotOverwriteCommittedCredential(t *testing.T) {
 	p.credential = r.Credential
 	done()
 	// A commit can succeed even when cancellation prevents publishing the new memory session.
-	if err := s.saveLogin(ctx, r, cache, []byte("new")); err != nil {
+	if err := s.saveLogin(ctx, r, cache, credential{Token: []byte("new")}); err != nil {
 		t.Fatal(err)
 	}
 	var auth *AuthRequired
 	if _, err := s.Sync(ctx, ProfileRequest{Profile: "default"}); !errors.As(err, &auth) || auth.Action != "unlock" {
 		t.Fatal(err)
 	}
-	token, err := s.token(ctx, r)
-	if err != nil || string(token) != "new" {
+	token, err := s.loadCredential(ctx, r)
+	if err != nil || string(token.Token) != "new" {
 		t.Fatal("stale session overwrote credential", err)
 	}
-	clear(token)
+	token.clear()
 	if len(f.values) != 2 {
 		t.Fatal("stale session changed cleanup journal")
 	}

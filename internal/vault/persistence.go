@@ -22,6 +22,7 @@ type Credentials interface {
 
 type record struct {
 	Version    int              `json:"version"`
+	AuthMethod string           `json:"authMethod,omitempty"`
 	Profile    string           `json:"profile"`
 	Cache      *bitwarden.Cache `json:"cache,omitempty"`
 	Credential string           `json:"credential,omitempty"`
@@ -32,6 +33,13 @@ type record struct {
 type credential struct {
 	Server, Email, AccountID string
 	Token                    []byte
+	ClientID                 string `json:",omitempty"`
+	ClientSecret             []byte `json:",omitempty"`
+}
+
+func (c *credential) clear() {
+	clear(c.Token)
+	clear(c.ClientSecret)
 }
 
 const chunkSize = 512 << 10
@@ -83,8 +91,11 @@ func (s *Service) load(ctx context.Context, name string) (*record, error) {
 	if len(data) == 0 {
 		return r, nil
 	}
-	if json.Unmarshal(data, r) != nil || r.Version != 1 || r.Profile != name || len(r.Garbage) > 4 {
+	if json.Unmarshal(data, r) != nil || r.Profile != name || len(r.Garbage) > 4 {
 		return nil, errors.New("invalid profile cache")
+	}
+	if !(r.Version == 1 && r.AuthMethod == "" || r.Version == 2 && r.AuthMethod == "apikey") {
+		return nil, errors.New("unsupported profile authentication version")
 	}
 	if r.Cache != nil && r.Cache.Version != 1 {
 		return nil, errors.New("unsupported cache version")
@@ -158,7 +169,7 @@ func (s *Service) cleanup(ctx context.Context, r *record) error {
 	return s.put(ctx, r.Profile, r)
 }
 
-func (s *Service) saveLogin(ctx context.Context, r *record, cache *bitwarden.Cache, token []byte) error {
+func (s *Service) saveLogin(ctx context.Context, r *record, cache *bitwarden.Cache, auth credential) error {
 	if s.Secrets == nil {
 		return errors.New("credential store unavailable")
 	}
@@ -171,7 +182,8 @@ func (s *Service) saveLogin(ctx context.Context, r *record, cache *bitwarden.Cac
 	if err := s.put(ctx, r.Profile, r); err != nil {
 		return err
 	}
-	data, err := json.Marshal(credential{cache.Server, cache.Email, cache.AccountID(), token})
+	auth.Server, auth.Email, auth.AccountID = cache.Server, cache.Email, cache.AccountID()
+	data, err := json.Marshal(auth)
 	if err != nil {
 		return err
 	}
@@ -181,6 +193,10 @@ func (s *Service) saveLogin(ctx context.Context, r *record, cache *bitwarden.Cac
 	}
 	old := r.Credential
 	r.Cache, r.Credential, r.Garbage = cache, key, nil
+	r.Version, r.AuthMethod = 1, ""
+	if auth.ClientID != "" {
+		r.Version, r.AuthMethod = 2, "apikey"
+	}
 	if old != "" {
 		r.Garbage = []string{old}
 	}
@@ -188,32 +204,40 @@ func (s *Service) saveLogin(ctx context.Context, r *record, cache *bitwarden.Cac
 	return s.put(ctx, r.Profile, r)
 }
 
-func (s *Service) token(ctx context.Context, r *record) ([]byte, error) {
+func (s *Service) loadCredential(ctx context.Context, r *record) (credential, error) {
 	if s.Secrets == nil {
-		return nil, errors.New("credential store unavailable")
+		return credential{}, errors.New("credential store unavailable")
 	}
 	data, err := s.Secrets.Get(ctx, r.Credential)
 	if err != nil {
-		return nil, err
+		return credential{}, err
 	}
 	defer clear(data)
 	var c credential
 	if json.Unmarshal(data, &c) != nil {
-		clear(c.Token)
-		return nil, errors.New("invalid saved credential")
+		c.clear()
+		return credential{}, errors.New("invalid saved credential")
 	}
-	if c.Server != r.Cache.Server || c.Email != r.Cache.Email || c.AccountID != r.Cache.AccountID() || len(c.Token) == 0 {
-		clear(c.Token)
-		return nil, errors.New("saved credential identity mismatch")
+	valid := len(c.Token) != 0 && c.ClientID == "" && len(c.ClientSecret) == 0
+	if r.AuthMethod == "apikey" {
+		key := bitwarden.APIKey{ClientID: c.ClientID, ClientSecret: c.ClientSecret}
+		valid = len(c.Token) == 0 && key.Validate() == nil && c.ClientID == "user."+c.AccountID
 	}
-	return c.Token, nil
+	if !valid || c.Server != r.Cache.Server || c.Email != r.Cache.Email || c.AccountID != r.Cache.AccountID() {
+		c.clear()
+		return credential{}, errors.New("saved credential identity mismatch")
+	}
+	return c, nil
 }
 
 func (s *Service) saveToken(ctx context.Context, r *record, token []byte) error {
+	if r.AuthMethod != "" || len(token) == 0 {
+		return errors.New("invalid refresh token credential")
+	}
 	if s.Secrets == nil {
 		return errors.New("credential store unavailable")
 	}
-	data, err := json.Marshal(credential{r.Cache.Server, r.Cache.Email, r.Cache.AccountID(), token})
+	data, err := json.Marshal(credential{Server: r.Cache.Server, Email: r.Cache.Email, AccountID: r.Cache.AccountID(), Token: token})
 	if err != nil {
 		return err
 	}

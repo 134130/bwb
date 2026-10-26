@@ -71,26 +71,35 @@ func (e *APIError) Is(target error) bool {
 type Session struct {
 	client                  *Client
 	key, access, refresh    *memguard.LockedBuffer
+	apiSecret               *memguard.LockedBuffer
+	apiClientID             string
 	protectedKey, accountID string
 	iterations              int
 }
 
 func (s *Session) Close() {
-	for _, buffer := range []*memguard.LockedBuffer{s.key, s.access, s.refresh} {
+	for _, buffer := range []*memguard.LockedBuffer{s.key, s.access, s.refresh, s.apiSecret} {
 		if buffer != nil {
 			buffer.Destroy()
 		}
 	}
 	s.key, s.access, s.refresh = nil, nil, nil
+	s.apiSecret, s.apiClientID = nil, ""
 	s.protectedKey, s.accountID = "", ""
 }
 
 func (s *Session) active() bool { return s.key != nil && s.key.IsAlive() }
 
 type tokens struct {
-	Access  string `json:"access_token"`
-	Refresh string `json:"refresh_token"`
-	Key     string `json:"Key"`
+	Access                string `json:"access_token"`
+	Refresh               string `json:"refresh_token"`
+	Key                   string `json:"Key"`
+	KDF                   *int   `json:"Kdf"`
+	Iterations            int    `json:"KdfIterations"`
+	APIUseKeyConnector    bool   `json:"ApiUseKeyConnector"`
+	UserDecryptionOptions *struct {
+		HasMasterPassword *bool `json:"HasMasterPassword"`
+	} `json:"UserDecryptionOptions"`
 }
 
 func (c *Client) Login(ctx context.Context, password []byte) (*Session, error) {
@@ -129,6 +138,10 @@ func (c *Client) Login(ctx context.Context, password []byte) (*Session, error) {
 	if response.Access == "" || response.Refresh == "" || response.Key == "" {
 		return nil, errors.New("incomplete login response")
 	}
+	return c.openSession(stretched, kdf.Iterations, response)
+}
+
+func (c *Client) openSession(stretched []byte, iterations int, response tokens) (*Session, error) {
 	key, err := decrypt(response.Key, stretched)
 	if err != nil {
 		return nil, err
@@ -138,13 +151,22 @@ func (c *Client) Login(ctx context.Context, password []byte) (*Session, error) {
 		return nil, ErrCipher
 	}
 	defer clear(key)
-	return &Session{client: c, key: memguard.NewBufferFromBytes(key),
-		access:  memguard.NewBufferFromBytes([]byte(response.Access)),
-		refresh: memguard.NewBufferFromBytes([]byte(response.Refresh)), protectedKey: response.Key, iterations: kdf.Iterations}, nil
+	session := &Session{client: c, key: memguard.NewBufferFromBytes(key),
+		access: memguard.NewBufferFromBytes([]byte(response.Access)), protectedKey: response.Key, iterations: iterations}
+	if response.Refresh != "" {
+		session.refresh = memguard.NewBufferFromBytes([]byte(response.Refresh))
+	}
+	return session, nil
 }
 
 func (s *Session) Refresh(ctx context.Context) error {
-	if !s.active() || s.refresh == nil {
+	if !s.active() {
+		return ErrAuthentication
+	}
+	if s.apiSecret != nil {
+		return s.refreshAPIKey(ctx)
+	}
+	if s.refresh == nil {
 		return ErrAuthentication
 	}
 	form := url.Values{"grant_type": {"refresh_token"}, "client_id": {"web"}, "refresh_token": {string(s.refresh.Bytes())}}

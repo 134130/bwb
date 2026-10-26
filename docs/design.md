@@ -22,14 +22,14 @@ Full integration은 실제 서버의 인증·동기화·복호화·조회·재�
 | 풀린 user/item/organization key | daemon의 보호된 메모리 | 파기 |
 | 검색 index, 복호화 값 | daemon/요청의 메모리 | 파기 |
 | API access token | daemon 메모리 | lock에서는 유지, 종료 시 파기 |
-| API refresh token | OS credential store | 유지; logout 시 삭제 |
+| API refresh token 또는 개인 API Key | OS credential store | 유지; logout 시 삭제 |
 | 암호화된 vault, protected key, KDF 설정 | daemonkit SQLite | 유지; logout 시 삭제 |
 | 서버·계정 ID, device ID, last_sync | daemonkit SQLite | 유지; logout 시 계정 데이터 삭제 |
 | profile 설정 | TOML config | 유지 |
 
-refresh token은 daemonkit `app.Secrets()`를 사용한다. plaintext 파일 fallback은 없다. credential store 사용 불가 시 로그인 저장에 실패했음을 알리고 완료로 보고하지 않는다. access token과 refresh token은 vault 복호화 키가 아니다. 보호된 키와 암호문은 비밀의 평문과 구분한다.
+refresh token과 개인 API Key는 daemonkit `app.Secrets()`를 사용한다. plaintext 파일 fallback은 없다. credential store 사용 불가 시 로그인 저장에 실패했음을 알리고 완료로 보고하지 않는다. access token·refresh token·API Key는 vault 복호화 키가 아니다. 보호된 키와 암호문은 비밀의 평문과 구분한다.
 
-이 저장 정책은 재로그인 없이 재시작 후 refresh하고, 오프라인에서도 비밀번호로 cached vault를 unlock하기 위한 제안이다. rbw의 token JSON 저장 대신 이미 사용 중인 daemonkit의 OS credential store를 재사용한다. 지원 grant가 refresh token을 제공하지 않으면 필요한 때 재로그인하며 임의로 API secret 저장을 추가하지 않는다.
+이 저장 정책은 재로그인 없이 재시작 후 refresh하고, 오프라인에서도 비밀번호로 cached vault를 unlock하기 위한 것이다. rbw의 token JSON 저장 대신 이미 사용 중인 daemonkit의 OS credential store를 재사용한다. 명시적 `login --apikey`는 개인 `client_id`·`client_secret`을 저장하고, refresh token 없이 `client_credentials` grant로 재발급한다. 첫 로그인에서 마스터 비밀번호로 복호화와 sync를 검증한 뒤 저장한다. API Key profile은 인증 방식을 포함한 v2 레코드를 사용하며 기존 비밀번호 profile의 v1 레코드를 계속 읽는다. 키가 폐기되면 명시적 API Key 재로그인을 요구하고 자동 비밀번호 로그인으로 전환하지 않는다. Key Connector·마스터 비밀번호 없는 계정·Argon2id는 이 인증 경로에서 지원하지 않는다.
 
 `lock`은 로컬 비밀 접근을 막는다. `logout`은 lock + 로컬 인증 자료 및 cached vault 제거다. 둘 다 이미 출력된 값이나 다른 장치의 세션을 회수하지 않는다. 서버 token 폐기는 해당 서버가 지원하고 검증된 경우에만 별도 동작으로 명시한다.
 
@@ -142,7 +142,7 @@ bwb daemon stop
 ```text
 CLI / TUI ─ typed local RPC ─ vault service
                                 ├─ 보호된 메모리: 풀린 키, index, access token
-                                ├─ daemonkit Secrets: refresh token
+                                ├─ daemonkit Secrets: refresh token 또는 개인 API Key
                                 ├─ daemonkit Storage: 암호화 snapshot + metadata
                                 └─ 재사용 HTTP client: Identity / Vault API
 ```
@@ -151,7 +151,7 @@ CLI / TUI ─ typed local RPC ─ vault service
 - UI는 입력/표현, service는 상태·권한·마스킹·동시성, API 코드는 protocol validation, crypto 코드는 키 계층과 암호문 검증을 소유한다. 잠금/인증 규칙을 CLI와 TUI에 복제하지 않는다.
 - secure string은 Go string 별칭이 아니다. 잠긴 메모리와 명시적 파기를 지원하는 구현을 선택한다. 보호된 메모리 확보 실패 시 unlock을 실패시키며 평문 장기 보관으로 fallback하지 않는다.
 - 비밀번호/KDF 중간 키는 인증 작업 후 파기하고, 풀린 키는 lock 때 파기한다. 평문 index도 민감 자료로 취급한다. RPC/HTTP/Go 문자열의 임시 복사까지 무복사나 완전한 zeroization을 보장하지 않는다.
-- secret을 argv/log/panic/status/SQLite에 기록하지 않는다. 전체 request/response 로깅 금지. refresh token의 OS credential store 저장은 명시적인 예외이며 OS 보호 정책을 따른다.
+- secret을 argv/log/panic/status/SQLite에 기록하지 않는다. 전체 request/response 로깅 금지. refresh token과 명시적 개인 API Key 로그인의 OS credential store 저장은 예외이며 OS 보호 정책을 따른다.
 - lock은 vault generation을 증가시키고 진행 중 복호화를 취소/회수한 뒤 key/index를 파기한다. lock 응답 이후 이전 generation의 비밀 응답을 발행하지 않는다. sync는 암호문을 갱신할 수 있지만 lock 뒤 index를 되살리지 않는다.
 - logout은 profile 전체 작업을 취소하고 admission을 막는다. SQLite에 logout 진행 상태를 먼저 기록하고 credential 삭제와 cache 제거를 완료한다. 중간 실패 시 잠긴 상태를 유지하고 재시작 때 정리를 재개하며 성공이라고 보고하지 않는다. keychain에서 남은 token을 재사용하지 않는다.
 - 재시작 후 vault는 locked다. credential store와 DB의 identity/완료 상태가 맞지 않는 부분 로그인은 폐기하거나 재인증한다. 키가 없는데 unlocked로 표시하지 않는다.
@@ -186,7 +186,7 @@ CLI / TUI ─ typed local RPC ─ vault service
 - 서로 다른 profile의 키/token/cache가 섞이지 않음. server/account 변경 거부.
 - lock과 read/sync 경합, logout 도중 credential store 오류/크래시 후 정리 재개.
 - warm 조회 HTTP/subprocess 0회. cold KDF/login/sync와 warm latency를 분리 측정하며 수치는 측정 후 확정.
-- DB/config/log/argv에 plaintext 비밀번호·복호화 키·token·vault 값 없음. refresh token은 OS credential store에만 존재. logout 뒤 cache/credential 접근 불가.
+- DB/config/log/argv에 plaintext 비밀번호·복호화 키·token·API Key·vault 값 없음. refresh token과 API Key의 영속 저장은 OS credential store만 사용. logout 뒤 cache/credential 접근 불가.
 - 중복 이름, 빈 값, Unicode, 여러 줄 notes, hidden field, card/identity 기본 마스킹, RPC 크기 초과.
 
 현재 Go API의 login/refresh/sync/8종 복호화와 Cobra → daemon RPC를 snapshot 서버에서 검증한다. profile별 키·토큰은 memguard locked memory, snapshot은 암호문으로 메모리에 유지한다. read는 HTTP 없이 동작하며 lock/shutdown은 진행 중 작업을 취소하고 세션을 파기한다. 임시 crypto/HTTP/RPC 평문 복사본까지 완전히 zeroize하지는 않는다. `main.go`는 root, 패키지는 `cli`, `vaultapi`, `daemon`, `vault`, `bitwarden`으로 나눈다. keychain refresh token과 SQLite 암호화 cache 저장, HTTP 없는 unlock, 로컬 logout을 구현했다. `lock`은 메모리만 파기하고 재시작 후 비밀번호로 unlock한다. SQLite/keychain 간 작업은 credential 정리 목록으로 복구하며, logout 실패 시 표시를 저장하고 unlock을 막는다. CLI 공통 실행부의 인증 후 원래 read/list/sync 1회 재시도까지 구현했다. 서비스의 AuthRequired/ErrStateChanged는 daemon에서 RPC 코드로 바꾸며 일반 장애는 그대로 전달한다. 자동 인증 예약은 연결 감시·취소·lock 및 2분 만료로 정리하고, 대기자는 prompt를 중복 생성하지 않는다. TUI·Argon2id·2FA는 후속이다. 테스트는 전용 서버·계정만 사용한다.

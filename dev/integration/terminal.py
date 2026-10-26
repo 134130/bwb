@@ -74,12 +74,28 @@ def main():
     scenario, binary, *args = sys.argv[1:]
     password = os.environ['BWB_TEST_PASSWORD'].encode()
     expected = os.environ['BWB_TEST_EXPECT'].encode()
+    if scenario == 'apikey':
+        os.environ.pop('BWB_CLIENTID', None)
+        os.environ.pop('BWB_CLIENTSECRET', None)
     commands = []
     try:
         commands.append(Command(binary, args))
         if scenario in ('concurrent', 'cancel_waiters'):
             commands.append(Command(binary, args))
-        if scenario == 'no_prompt':
+        if scenario == 'apikey':
+            owner = commands[0]
+            for label, value in ((b'Client ID: ', os.environ['BWB_INTEGRATION_CLIENTID'].encode()),
+                                 (b'Client secret: ', os.environ['BWB_INTEGRATION_CLIENTSECRET'].encode()),
+                                 (b'Password: ', password)):
+                until(commands, lambda: label in owner.terminal or owner.status is not None)
+                assert label in owner.terminal, 'missing API key prompt'
+                assert not termios.tcgetattr(owner.tty)[3] & termios.ECHO, 'credential echo enabled'
+                owner.send(value + b'\n')
+            until(commands, lambda: owner.status is not None and not owner.open_fds)
+            assert owner.status == 0 and bytes(owner.output) == expected, 'API key login failed'
+            assert termios.tcgetattr(owner.tty)[3] & termios.ECHO, 'terminal echo not restored'
+            assert os.environ['BWB_INTEGRATION_CLIENTSECRET'].encode() not in owner.terminal, 'API key echoed'
+        elif scenario == 'no_prompt':
             until(commands, lambda: all(c.status is not None and not c.open_fds for c in commands))
             assert commands[0].status != 0 and not commands[0].has_prompt()
             assert not commands[0].output, 'failed command wrote stdout'

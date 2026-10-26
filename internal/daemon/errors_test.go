@@ -16,7 +16,7 @@ import (
 func TestDomainErrorTranslation(t *testing.T) {
 	for _, action := range []string{"login", "unlock"} {
 		handler := rpcHandler(func(context.Context, vault.Empty) (vault.ReadResponse, error) {
-			return vault.ReadResponse{Value: "must not escape"}, &vault.AuthRequired{Action: action, Profile: "work", Epoch: 4, Version: 7}
+			return vault.ReadResponse{Value: "must not escape"}, &vault.AuthRequired{Action: action, Method: "apikey", Profile: "work", Epoch: 4, Version: 7}
 		})
 		result, err := handler(context.Background(), vault.Empty{})
 		var rpc *kit.RPCError
@@ -28,7 +28,7 @@ func TestDomainErrorTranslation(t *testing.T) {
 			want = vaultapi.LoginRequiredCode
 		}
 		var detail vaultapi.AuthDetails
-		if rpc.Code != want || json.Unmarshal(rpc.Data, &detail) != nil || detail.Profile != "work" || detail.Epoch != 4 || detail.Version != 7 {
+		if rpc.Code != want || json.Unmarshal(rpc.Data, &detail) != nil || detail.Profile != "work" || detail.Method != "apikey" || detail.Epoch != 4 || detail.Version != 7 {
 			t.Fatal("lost auth contract")
 		}
 	}

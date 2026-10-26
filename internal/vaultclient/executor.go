@@ -10,7 +10,7 @@ import (
 	kit "github.com/134130/go-daemonkit"
 )
 
-type AuthPrompt struct{ Action, Profile, Server, Email string }
+type AuthPrompt struct{ Action, Profile, Server, Email, Label string }
 type PasswordPrompt func(context.Context, AuthPrompt) ([]byte, error)
 
 type Executor struct {
@@ -61,6 +61,9 @@ func (e Executor) authenticate(ctx context.Context, profile string, failure erro
 	}
 	var detail vaultapi.AuthDetails
 	if json.Unmarshal(rpc.Data, &detail) != nil || detail.Profile != profile {
+		return failure
+	}
+	if action == "login" && detail.Method != "" {
 		return failure
 	}
 	reservation, err := e.Client.Invoke(ctx, vaultapi.BeginAuth, vaultapi.AuthRequest{Profile: profile, Action: action, Epoch: detail.Epoch, Version: detail.Version})

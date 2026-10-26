@@ -17,7 +17,7 @@ func authService(t *testing.T) *Service {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.saveLogin(context.Background(), r, &bitwarden.Cache{Version: 1, Server: "https://example.invalid", Email: "user@example.invalid"}, []byte("token")); err != nil {
+	if err := s.saveLogin(context.Background(), r, &bitwarden.Cache{Version: 1, Server: "https://example.invalid", Email: "user@example.invalid"}, credential{Token: []byte("token")}); err != nil {
 		t.Fatal(err)
 	}
 	return s

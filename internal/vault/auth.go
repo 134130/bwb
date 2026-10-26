@@ -56,7 +56,7 @@ func (s *Service) authRequired(ctx context.Context, p *profile, name, action str
 	if s.closed || p.barriers != 0 {
 		return ErrStateChanged
 	}
-	return &AuthRequired{Action: action, Profile: name, Epoch: p.epoch, Version: p.authVersion}
+	return &AuthRequired{Action: action, Method: saved.AuthMethod, Profile: name, Epoch: p.epoch, Version: p.authVersion}
 }
 
 // BeginAuth elects one prompt owner. Waiting RPCs are canceled on disconnection;
@@ -79,6 +79,11 @@ func (s *Service) BeginAuth(ctx context.Context, req AuthRequest) (AuthResponse,
 		if saved.Deleting {
 			done()
 			return AuthResponse{}, errors.New("logout incomplete; retry logout")
+		}
+		if req.Action == "login" && saved.AuthMethod == "apikey" {
+			err := s.authRequired(waitCtx, p, req.Profile, "login")
+			done()
+			return AuthResponse{}, err
 		}
 		policy, configured := s.policies[req.Profile]
 		if saved.Cache == nil && (!configured || req.Action != "login") {

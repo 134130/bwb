@@ -27,10 +27,20 @@ func NewRoot() *cobra.Command {
 	root.PersistentFlags().StringVar(&profile, "profile", "default", "Vault profile")
 	var server, email string
 	var passwordStdin bool
+	var apiKeyLogin bool
 	login := &cobra.Command{Use: "login", Short: "Log in and cache an encrypted snapshot", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if server != "" && email != "" {
 				if _, err := bitwarden.NewClient(server, email, uuid.NewString()); err != nil {
+					return err
+				}
+			}
+			var apiKey bitwarden.APIKey
+			if apiKeyLogin {
+				var err error
+				apiKey, err = commandAPIKey(cmd, nonInteractive, authPrompt{Action: "login", Profile: profile, Server: server, Email: email})
+				defer clear(apiKey.ClientSecret)
+				if err != nil {
 					return err
 				}
 			}
@@ -44,12 +54,22 @@ func NewRoot() *cobra.Command {
 				return err
 			}
 			defer client.Close()
-			_, err = client.Invoke(cmd.Context(), vaultapi.Login, vaultapi.LoginRequest{Profile: profile, Server: server, Email: email, Password: password})
+			req := vaultapi.LoginRequest{Profile: profile, Server: server, Email: email, Password: password}
+			if apiKeyLogin {
+				_, err = client.Invoke(cmd.Context(), vaultapi.LoginAPIKey, vaultapi.LoginAPIKeyRequest{LoginRequest: req, APIKey: apiKey})
+				var rpc *kit.RPCError
+				if errors.As(err, &rpc) && rpc.Code == -32601 {
+					return errors.New("API key login requires an updated daemon; run daemon update")
+				}
+			} else {
+				_, err = client.Invoke(cmd.Context(), vaultapi.Login, req)
+			}
 			return err
 		}}
 	login.Flags().StringVar(&server, "server", "", "Vault URL (HTTPS, or loopback HTTP)")
 	login.Flags().StringVar(&email, "email", "", "Account email")
 	login.Flags().BoolVar(&passwordStdin, "password-stdin", false, "Read master password from stdin")
+	login.Flags().BoolVar(&apiKeyLogin, "apikey", false, "Authenticate with a personal API key, then unlock with the master password")
 	var unlockStdin bool
 	unlock := &cobra.Command{Use: "unlock", Short: "Unlock a saved vault without network access", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		password, err := commandPassword(cmd, unlockStdin, nonInteractive, authPrompt{Action: "unlock", Profile: profile})
@@ -192,6 +212,12 @@ func NewRoot() *cobra.Command {
 		root.AddCommand(listCommand(kind, &profile, &nonInteractive))
 	}
 	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
+		// Any command can launch or update the daemon; unused API keys must not be inherited.
+		if cmd != login || !apiKeyLogin {
+			if err := errors.Join(os.Unsetenv("BWB_CLIENTID"), os.Unsetenv("BWB_CLIENTSECRET")); err != nil {
+				return err
+			}
+		}
 		return prepareConfig(cmd, configPath, &profile, root.PersistentFlags().Changed("profile"))
 	}
 	configuration, profiles := configCommands()

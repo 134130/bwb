@@ -43,6 +43,7 @@ func TestExecutorDoesNotAuthenticateOrdinaryOrNoninteractiveErrors(t *testing.T)
 		&kit.RPCError{Code: -32000, Message: "login required"},
 		&kit.RPCError{Code: vaultapi.StateChangedCode, Message: "vault locked"},
 		&kit.RPCError{Code: vaultapi.LoginRequiredCode, Data: []byte(`{"profile":"other"}`)},
+		&kit.RPCError{Code: vaultapi.LoginRequiredCode, Data: []byte(`{"profile":"default","method":"apikey"}`)},
 		&kit.RPCError{Code: vaultapi.UnlockRequiredCode, Data: []byte(`bad`)},
 	} {
 		if got := e.authenticate(context.Background(), "default", err); got != err {

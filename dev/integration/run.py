@@ -360,11 +360,16 @@ def main():
                 require(db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok', 'corrupt snapshot')
             with Server(directory) as server:
                 verify(server, manifest)
+                auth = server.login()
+                api_key = server.request('POST', '/api/accounts/api-key',
+                                         {'masterPasswordHash': master_keys()[1]}, auth['access_token'])
                 subprocess.run(
                     # Packages share a server; membership mutation tests restore before CLI tests.
                     ['go', 'test', '-p=1', '-tags=integration', '-count=1', '-v',
                      './internal/bitwarden', './internal/cli'],
-                    cwd=ROOT, env={**os.environ, 'BWB_INTEGRATION_URL': server.url}, check=True)
+                    cwd=ROOT, env={**os.environ, 'BWB_INTEGRATION_URL': server.url,
+                                   'BWB_INTEGRATION_CLIENTID': 'user.' + manifest['account_id'],
+                                   'BWB_INTEGRATION_CLIENTSECRET': api_key['apiKey']}, check=True)
 
 
 if __name__ == '__main__':

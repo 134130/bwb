@@ -64,6 +64,8 @@ fixture를 바꾸고 snapshot 재생성을 잊으면 checksum 검사에서 실�
 
 `dev/compose.yaml`은 별도의 수동 개발 서버 구성이다. pre-commit integration runner는 이 장기 volume을 사용하지 않는다.
 
+API Key 검증은 복원된 임시 서버에서 테스트 계정의 개인 키를 발급해 실행한다. SQL dump나 manifest에는 API Key를 추가하지 않는다. CLI 로그인, 401 후 재발급, daemon 재시작 후 keychain 복구, 오프라인 unlock, 폐기된 키의 명시적 재로그인 안내, logout, 실제 PTY의 세 단계 숨김 입력을 검사한다. `testdata/apikey.json`은 단위 테스트용 합성 암호문이며 비밀번호와 API Key는 의도적으로 공개된 테스트 값이다. keychain 장애·계정 불일치·잠금과 자격증명 읽기의 경합은 단위 테스트로 검사한다.
+
 - 상태 조회 integration은 daemon 설정 경로, reload 전후 실제 timeout, 잘못된 TOML 중 조회, verbose 조회의 잠금 시각 불변과 stopped 조회의 무기동을 검사한다.
 
 ## Release와 hook 관리

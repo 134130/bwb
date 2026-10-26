@@ -33,7 +33,7 @@ func rpcHandler[Req, Resp any](handler func(context.Context, Req) (Resp, error))
 			} else if auth.Action != "unlock" {
 				return zero, err
 			}
-			data, _ := json.Marshal(vaultapi.AuthDetails{Profile: auth.Profile, Epoch: auth.Epoch, Version: auth.Version})
+			data, _ := json.Marshal(vaultapi.AuthDetails{Profile: auth.Profile, Method: auth.Method, Epoch: auth.Epoch, Version: auth.Version})
 			return zero, &kit.RPCError{Code: code, Message: auth.Error(), Data: data}
 		}
 		return zero, err

@@ -93,6 +93,9 @@ func Run(ctx context.Context, configFlag string) error {
 	if err := app.Handle(vaultapi.Login, rpcHandler(service.Login)); err != nil {
 		return err
 	}
+	if err := app.Handle(vaultapi.LoginAPIKey, rpcHandler(service.LoginAPIKey)); err != nil {
+		return err
+	}
 	if err := app.Handle(vaultapi.List, rpcHandler(service.List)); err != nil {
 		return err
 	}

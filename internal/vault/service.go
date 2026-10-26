@@ -139,6 +139,15 @@ func (s *Service) begin(ctx context.Context, name string, create bool) (context.
 }
 
 func (s *Service) Login(ctx context.Context, req LoginRequest) (Empty, error) {
+	return s.login(ctx, req, nil)
+}
+
+func (s *Service) LoginAPIKey(ctx context.Context, req LoginAPIKeyRequest) (Empty, error) {
+	defer clear(req.ClientSecret)
+	return s.login(ctx, req.LoginRequest, &req.APIKey)
+}
+
+func (s *Service) login(ctx context.Context, req LoginRequest, apiKey *bitwarden.APIKey) (Empty, error) {
 	defer clear(req.Password)
 	ctx, p, done, err := s.begin(ctx, req.Profile, true)
 	if err != nil {
@@ -155,6 +164,9 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (Empty, error) {
 	}
 	if saved.Deleting {
 		return Empty{}, errors.New("logout incomplete; retry logout")
+	}
+	if saved.AuthMethod == "apikey" && apiKey == nil {
+		return Empty{}, s.authRequired(ctx, p, req.Profile, "login")
 	}
 	policy, configured := s.policies[req.Profile]
 	if configured {
@@ -181,7 +193,12 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (Empty, error) {
 			return Empty{}, err
 		}
 	}
-	session, err := client.Login(ctx, req.Password)
+	var session *bitwarden.Session
+	if apiKey != nil {
+		session, err = client.LoginAPIKey(ctx, req.Password, *apiKey)
+	} else {
+		session, err = client.Login(ctx, req.Password)
+	}
 	if err != nil {
 		return Empty{}, err
 	}
@@ -200,7 +217,11 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (Empty, error) {
 	}
 	token := session.RefreshToken()
 	defer clear(token)
-	if err := s.saveLogin(ctx, saved, cache, token); err != nil {
+	auth := credential{Token: token}
+	if apiKey != nil {
+		auth.ClientID, auth.ClientSecret = apiKey.ClientID, apiKey.ClientSecret
+	}
+	if err := s.saveLogin(ctx, saved, cache, auth); err != nil {
 		return Empty{}, err
 	}
 	s.mu.Lock()
@@ -281,17 +302,22 @@ func (s *Service) Sync(ctx context.Context, req ProfileRequest) (Empty, error) {
 	if err := s.cleanup(ctx, saved); err != nil {
 		return Empty{}, err
 	}
-	token := p.session.RefreshToken()
-	if len(token) == 0 {
-		token, err = s.token(ctx, saved)
+	if !p.session.HasCredentials() {
+		auth, err := s.loadCredential(ctx, saved)
 		if err != nil {
 			return Empty{}, err
 		}
-		if err := p.session.SetRefreshToken(token); err != nil {
-			clear(token)
+		if saved.AuthMethod == "apikey" {
+			err = p.session.SetAPIKey(bitwarden.APIKey{ClientID: auth.ClientID, ClientSecret: auth.ClientSecret})
+		} else {
+			err = p.session.SetRefreshToken(auth.Token)
+		}
+		auth.clear()
+		if err != nil {
 			return Empty{}, err
 		}
 	}
+	token := p.session.RefreshToken()
 	defer clear(token)
 	snapshot, syncErr := p.session.SyncSnapshot(ctx)
 	refreshed := p.session.RefreshToken()
@@ -303,8 +329,10 @@ func (s *Service) Sync(ctx context.Context, req ProfileRequest) (Empty, error) {
 		writeCtx = context.WithoutCancel(ctx)
 	}
 	// Also retry a previous credential write failure before reporting success.
-	if err := s.saveToken(writeCtx, saved, refreshed); err != nil {
-		return Empty{}, errors.Join(syncErr, err)
+	if saved.AuthMethod == "" {
+		if err := s.saveToken(writeCtx, saved, refreshed); err != nil {
+			return Empty{}, errors.Join(syncErr, err)
+		}
 	}
 	if syncErr != nil {
 		if errors.Is(syncErr, bitwarden.ErrAuthentication) || errors.Is(syncErr, bitwarden.ErrKeyChanged) {

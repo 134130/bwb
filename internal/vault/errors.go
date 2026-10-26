@@ -7,6 +7,7 @@ var ErrStateChanged = errors.New("vault state changed; retry the command")
 // AuthRequired describes recoverable state, not rejected credentials or infrastructure failure.
 type AuthRequired struct {
 	Action  string
+	Method  string
 	Profile string
 	Epoch   uint64
 	Version uint64
@@ -15,6 +16,9 @@ type AuthRequired struct {
 func (e *AuthRequired) Error() string {
 	if e.Action == "unlock" {
 		return "vault locked; run unlock"
+	}
+	if e.Method == "apikey" {
+		return "API key login required; run login --apikey"
 	}
 	return "login required; run login"
 }

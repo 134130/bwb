@@ -13,6 +13,7 @@ type NamedID = vault.NamedID
 
 type ProfileRequest = vault.ProfileRequest
 type LoginRequest = vault.LoginRequest
+type LoginAPIKeyRequest = vault.LoginAPIKeyRequest
 type UnlockRequest = vault.UnlockRequest
 type ReadRequest = vault.ReadRequest
 type Empty = vault.Empty
@@ -35,6 +36,7 @@ const (
 
 type AuthDetails struct {
 	Profile string `json:"profile"`
+	Method  string `json:"method,omitempty"`
 	Epoch   uint64 `json:"epoch"`
 	Version uint64 `json:"version"`
 }
@@ -59,6 +61,7 @@ var (
 	Unlock       = daemon.NewMethod[UnlockRequest, Empty]("vault.unlock")
 	Logout       = daemon.NewMethod[ProfileRequest, Empty]("vault.logout")
 	Login        = daemon.NewMethod[LoginRequest, Empty]("vault.login")
+	LoginAPIKey  = daemon.NewMethod[LoginAPIKeyRequest, Empty]("vault.loginApiKey")
 	Read         = daemon.NewMethod[ReadRequest, ReadResponse]("vault.read")
 	Sync         = daemon.NewMethod[ProfileRequest, Empty]("vault.sync")
 	Lock         = daemon.NewMethod[ProfileRequest, Empty]("vault.lock")

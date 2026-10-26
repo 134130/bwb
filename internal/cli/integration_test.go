@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -67,17 +68,33 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	var offline atomic.Bool
 	var pauseSync atomic.Bool
 	var rejectRefresh atomic.Bool
+	var rejectAPIKey, expireAPIKey atomic.Bool
+	var apiKeyRequests atomic.Int64
 	syncStarted := make(chan struct{}, 1)
 	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
-		if rejectRefresh.Load() && r.URL.Path == "/identity/connect/token" {
+		if r.URL.Path == "/identity/connect/token" {
 			body, _ := io.ReadAll(r.Body)
 			r.Body = io.NopCloser(bytes.NewReader(body))
 			form, _ := url.ParseQuery(string(body))
-			if form.Get("grant_type") == "refresh_token" {
+			if form.Get("grant_type") == "client_credentials" {
+				apiKeyRequests.Add(1)
+				if form.Has("password") || form.Has("username") || form.Has("refresh_token") {
+					t.Error("API key login sent password credentials")
+				}
+				if rejectAPIKey.Load() {
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+			}
+			if rejectRefresh.Load() && form.Get("grant_type") == "refresh_token" {
 				w.WriteHeader(http.StatusUnauthorized)
 				return
 			}
+		}
+		if r.URL.Path == "/api/sync" && expireAPIKey.CompareAndSwap(true, false) {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
 		}
 		if pauseSync.Load() && r.URL.Path == "/api/sync" {
 			syncStarted <- struct{}{}
@@ -96,6 +113,9 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 		defer cancel()
 		command := exec.CommandContext(ctx, binary, args...)
 		command.Env = append(os.Environ(), "XDG_STATE_HOME="+state, "BWB_INSTANCE="+instance)
+		if slices.Contains(args, "--apikey") {
+			command.Env = append(command.Env, "BWB_CLIENTID="+os.Getenv("BWB_INTEGRATION_CLIENTID"), "BWB_CLIENTSECRET="+os.Getenv("BWB_INTEGRATION_CLIENTSECRET"))
+		}
 		command.Stdin = strings.NewReader(password)
 		var stdout, stderr bytes.Buffer
 		command.Stdout, command.Stderr = &stdout, &stderr
@@ -116,7 +136,7 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 		}
 	}
 	defer func() {
-		for _, profile := range []string{"default", "other", "restricted", "timed", "steady"} {
+		for _, profile := range []string{"default", "other", "restricted", "timed", "steady", "api"} {
 			if output, err := run("", "--profile", profile, "logout"); err != nil {
 				t.Errorf("credential cleanup: %v %s", err, output)
 			}
@@ -395,6 +415,51 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	if _, err := run(manifest.Password+"\n", "unlock", "--password-stdin"); err == nil {
 		t.Fatal("logout did not survive restart")
 	}
+	// Personal API keys must survive restart without relying on refresh tokens or launcher environment.
+	apiLogin := append([]string{"--profile", "api"}, login...)
+	apiLogin = append(apiLogin, "--apikey")
+	must(manifest.Password+"\n", "", apiLogin...)
+	must("", "DEMO-only-password-1!", "--profile", "api", "read", id, "login/password")
+	apiBefore := apiKeyRequests.Load()
+	expireAPIKey.Store(true)
+	must("", "", "--profile", "api", "sync")
+	if apiKeyRequests.Load() != apiBefore+1 {
+		t.Fatal("API key 401 did not renew exactly once")
+	}
+	must("", "", "daemon", "stop")
+	offline.Store(true)
+	before = requests.Load()
+	must(manifest.Password+"\n", "", "--profile", "api", "unlock", "--password-stdin")
+	must("", "DEMO-only-password-1!", "--profile", "api", "read", id, "login/password")
+	if requests.Load() != before {
+		t.Fatal("API key offline unlock contacted server")
+	}
+	offline.Store(false)
+	apiBefore = apiKeyRequests.Load()
+	must("", "", "--profile", "api", "sync")
+	if apiKeyRequests.Load() != apiBefore+1 {
+		t.Fatal("API key restart did not use keychain")
+	}
+	if _, err := run("wrong\n", apiLogin...); err == nil {
+		t.Fatal("API login accepted wrong master password")
+	}
+	must("", "DEMO-only-password-1!", "--profile", "api", "read", id, "login/password")
+	must("", "", "--profile", "api", "lock")
+	terminal("success", "", "--profile", "api", "unlock")
+	rejectAPIKey.Store(true)
+	if output, err := run("", "--profile", "api", "sync"); err == nil || !strings.Contains(output, "login --apikey") {
+		t.Fatal("API key revocation not reported", err)
+	}
+	terminal("no_prompt", "", "--profile", "api", "sync")
+	must("", "DEMO-only-password-1!", "--profile", "api", "read", id, "login/password")
+	rejectAPIKey.Store(false)
+	terminal("apikey", "", "--profile", "api", "login", "--apikey", "--server", endpoint.URL, "--email", manifest.Email)
+	must("", "", "--profile", "api", "logout")
+	must("", "logged_out\n", "--profile", "api", "status")
+	if _, err := run(manifest.Password+"\n", "--profile", "api", "unlock", "--password-stdin"); err == nil {
+		t.Fatal("API key logout retained unlock")
+	}
+
 	// Daemon loads config at startup; edits take effect only through reload.
 	must("", "", "daemon", "stop")
 	configPath := filepath.Join(t.TempDir(), "config.toml")

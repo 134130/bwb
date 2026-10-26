@@ -8,7 +8,7 @@ Bitwarden를 CLI와 TUI로 사용하는 Go 클라이언트. 현재는 Cobra CLI 
 
 최종 설계 방향: CLI + TUI, go-daemonkit daemon, Bitwarden API 직접 호출.
 서버 login과 로컬 unlock을 분리하고, 명령이 필요한 인증을 거쳐 재개된다.
-풀린 키는 daemon 메모리, refresh token은 OS credential store, 암호화된 vault는 로컬 SQLite에 보관한다.
+풀린 키는 daemon 메모리, refresh token 또는 개인 API Key는 OS credential store, 암호화된 vault는 로컬 SQLite에 보관한다.
 BW_SESSION이나 bw/rbw 실행 파일에 의존하지 않는다. 세부 설계와 구현 순서는 위 문서를 참고한다.
 
 필수 [integration snapshot](testdata/integration/README.md)은 8종·19개 항목을 포함한다. `dev/integration/run.py`가 전용 서버에 복원해 실제 API를 검사하고, Lefthook pre-commit이 매 커밋마다 실행한다. 실행 준비는 개발 가이드를 따른다.
@@ -37,9 +37,9 @@ go build -o .dev/bwb .
 
 `PASSWORD_INPUT`은 안전하게 공급한 stdin을 뜻한다. 비밀번호를 argv에 넣거나 echo가 켜진 터미널에 직접 입력하지 않는다. 마지막 LF/CRLF 한 개만 제거하며 공백은 유지한다. `read`는 줄바꿈을 추가하지 않는다. `name`, `notes`, `fields/NAME`(슬래시 포함), `TYPE/FIELD` 지원. 현재 RPC 응답 제한 때문에 필드 하나는 최대 10,000 bytes다.
 
-첫 login이 같은 바이너리의 `daemon run`을 자동 시작한다. profile 기본값은 `default`. login은 API 인증·첫 sync 후 암호화 snapshot과 KDF/보호된 키/device ID를 daemonkit SQLite에 저장하고, refresh token은 OS keychain에 저장한다. 비밀번호·복호화 키·access token은 디스크에 저장하지 않는다. 같은 profile을 다른 서버·계정에 연결하려면 먼저 logout해야 한다.
+첫 login이 같은 바이너리의 `daemon run`을 자동 시작한다. profile 기본값은 `default`. login은 API 인증·첫 sync 후 암호화 snapshot과 KDF/보호된 키/device ID를 daemonkit SQLite에 저장하고, refresh token 또는 개인 API Key를 OS keychain에 저장한다. 비밀번호·복호화 키·access token은 디스크에 저장하지 않는다. 같은 profile을 다른 서버·계정에 연결하려면 먼저 logout해야 한다.
 
-`read`는 별도 CLI 프로세스에서도 HTTP 없이 cached ciphertext를 복호화한다. `unlock`은 저장된 KDF·보호된 키로 비밀번호를 검증하므로 재시작 후에도 네트워크와 keychain 접근 없이 동작한다. `sync`는 필요할 때 keychain의 refresh token을 사용하며 401 후 refresh는 한 번만 시도한다. 대화형 `read/list/sync`는 인증 필요 오류를 받으면 CLI에서 인증한 뒤 원래 작업을 한 번만 재시도한다. token 만료는 cached read를 막지 않는다.
+`read`는 별도 CLI 프로세스에서도 HTTP 없이 cached ciphertext를 복호화한다. `unlock`은 저장된 KDF·보호된 키로 비밀번호를 검증하므로 재시작 후에도 네트워크와 keychain 접근 없이 동작한다. `sync`는 필요할 때 keychain의 refresh token 또는 API Key로 access token을 발급하며 401 후 갱신은 한 번만 시도한다. 대화형 `read/list/sync`는 인증 필요 오류를 받으면 CLI에서 인증한 뒤 원래 작업을 한 번만 재시도한다. API Key 재로그인은 명시적 `login --apikey`가 필요하다. token 만료는 cached read를 막지 않는다.
 
 `lock`은 진행 중 작업을 취소하고 메모리 키·토큰·snapshot을 파기한다. 암호화 cache와 keychain 로그인은 남는다. `logout`은 선택 profile의 로컬 cache와 keychain 로그인도 삭제한다. 원격 vault나 원격 로그인은 삭제/폐기하지 않는다. daemon 종료는 전체 profile을 잠근다. 이미 반환한 평문·전송 중 응답은 회수하지 않는다.
 
@@ -54,6 +54,26 @@ SQLite와 keychain은 분산 트랜잭션이 아니므로 credential 참조와 �
 자동 인증은 profile당 prompt 소유자 하나를 예약하고 다른 CLI는 결과를 기다린다. 소유자의 취소·연결 종료·lock/logout은 예약을 폐기하며 대기자에게 새 prompt를 연쇄 생성하지 않는다. 응답 직후 연결 감시를 시작하기 전 이탈 같은 경우를 위해 미사용 예약은 2분 뒤 만료된다. 비밀번호는 daemon 예약에 보관하지 않는다. 암호화 실패·네트워크·keychain 장애는 자동 로그인으로 바꾸지 않는다. 잠금과 서버 로그인 만료가 겹치면 1회 복구 한도 때문에 명시적 login이 필요할 수 있다.
 
 현재 대화형 입력은 macOS/Linux 지원. 다른 OS에서는 명시적 `login/unlock --password-stdin`을 사용한다. 입력 중 Ctrl-C/SIGINT/lock을 처리한 뒤 터미널 echo를 복원한다.
+
+### 개인 API Key 로그인
+
+```sh
+bwb login --apikey --profile work --server SERVER_URL --email EMAIL
+```
+
+`client_id`, `client_secret`, 마스터 비밀번호를 숨김 입력으로 받는다. 설정에 server/email이 있으면 생략할 수 있다. 기존 login처럼 첫 sync와 unlock까지 성공해야 로그인을 저장한다. API Key는 서버 인증에 사용하고, 마스터 비밀번호는 로컬 복호화에만 사용한다. 개인 키(`user.<account UUID>`)만 지원하며 조직 API Key와 Secrets Manager 토큰은 받지 않는다.
+
+자동화에서는 `BWB_CLIENTID`와 `BWB_CLIENTSECRET`을 안전하게 환경변수로 공급하고 다음 명령을 실행한다. `--password-stdin`에는 마스터 비밀번호만 전달한다.
+
+```sh
+bwb login --apikey --profile work --non-interactive --password-stdin < PASSWORD_INPUT
+```
+
+API Key 환경변수는 `--apikey`일 때만 읽고, daemon 시작 전에 현재 CLI 환경에서 제거한다. 비대화형 실행에서 값이 부족하면 stdin을 읽기 전에 실패한다. TOML이나 비밀값을 받는 명령행 옵션은 사용하지 않는다.
+
+keychain에는 서버·이메일·계정 ID에 묶인 `client_id`와 `client_secret`을 저장한다. 메모리의 secret은 `memguard`로 보호하며 lock/종료 시 파기한다. unlock은 오프라인으로 가능하고, 다음 sync에서 keychain의 API Key로 재인증한다. 키가 폐기되면 `login --apikey`를 안내하며 비밀번호 로그인으로 전환하지 않는다. cached read는 계속 가능하다. logout은 로컬 키를 삭제하며 서버의 API Key 자체는 폐기하지 않는다.
+
+마스터 비밀번호가 있는 PBKDF2 계정만 지원한다. Key Connector·마스터 비밀번호 없는 계정·Argon2id·브라우저 SSO는 지원하지 않는다. 실행 중인 구 daemon은 `daemon update`로 갱신해야 한다. API Key profile은 v2 레코드를 사용해 구 바이너리가 거부하며, 기존 비밀번호 profile의 v1 레코드는 계속 읽는다. 구 버전으로 내리려면 새 버전에서 API Key profile을 먼저 logout한다.
 
 ```text
 main.go → internal/cli (Cobra + 인증 실행부)

@@ -20,7 +20,7 @@ func TestProfilesIncludeConfiguredAndPersistedAccounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.saveLogin(t.Context(), saved, &bitwarden.Cache{Version: 1, Server: policy.Server, Email: policy.Email}, []byte("token")); err != nil {
+	if err := s.saveLogin(t.Context(), saved, &bitwarden.Cache{Version: 1, Server: policy.Server, Email: policy.Email}, credential{Token: []byte("token")}); err != nil {
 		t.Fatal(err)
 	}
 	profiles, err := s.Profiles(t.Context(), Empty{})
