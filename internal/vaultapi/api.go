@@ -18,6 +18,8 @@ type UnlockRequest = vault.UnlockRequest
 type ReadRequest = vault.ReadRequest
 type Empty = vault.Empty
 type ReadResponse = vault.ReadResponse
+type ItemRequest = vault.ItemRequest
+type ItemResponse = vault.ItemResponse
 type DescribeRequest = vault.DescribeRequest
 type DescribeResponse = vault.DescribeResponse
 type ProfilesResponse = vault.ProfilesResponse
@@ -63,6 +65,7 @@ var (
 	Login        = daemon.NewMethod[LoginRequest, Empty]("vault.login")
 	LoginAPIKey  = daemon.NewMethod[LoginAPIKeyRequest, Empty]("vault.loginApiKey")
 	Read         = daemon.NewMethod[ReadRequest, ReadResponse]("vault.read")
+	Item         = daemon.NewMethod[ItemRequest, ItemResponse]("vault.item")
 	Sync         = daemon.NewMethod[ProfileRequest, Empty]("vault.sync")
 	Lock         = daemon.NewMethod[ProfileRequest, Empty]("vault.lock")
 	Status       = daemon.NewMethod[ProfileRequest, StatusResponse]("vault.status")

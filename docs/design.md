@@ -1,6 +1,6 @@
 # bwb 설계
 
-상태: 목표 설계와 구현 계획. Cobra read, daemon/영속 cache, 인증 재개까지 구현했다. 조직 vault/collection 복호화·권한 제한·snapshot 검증도 구현했다. 목록·검색 RPC/CLI, config와 profile별 자동 잠금도 구현했다. TUI는 후속이다. 아래 계약에는 미구현 내용이 포함되며 현재 사용법은 README를 따른다.
+상태: 목표 설계와 구현 계획. Cobra item read/totp, daemon/영속 cache, 인증 재개까지 구현했다. 조직 vault/collection 복호화·권한 제한·snapshot 검증도 구현했다. 목록·검색 RPC/CLI, config와 profile별 자동 잠금도 구현했다. TUI Explorer도 구현했다. 아래 계약에는 미구현 내용이 포함되며 현재 사용법은 README를 따른다.
 
 ## 1. 방향과 첫 범위
 
@@ -49,7 +49,7 @@ CLI / TUI → daemon에 작업 요청
 | 명령 | API 로그인 필요 | vault unlock 필요 |
 | --- | --- | --- |
 | status / profile list | 아니오 | 아니오 |
-| item list/get/read, TUI 탐색 | 기존 cache가 있으면 아니오 | 예 |
+| item list/read/totp, TUI 탐색 | 기존 cache가 있으면 아니오 | 예 |
 | sync | 예 | 아니오 |
 | login | 예 | 아니오; 입력 비밀번호를 장기 보관하지 않음 |
 | unlock | cache가 있으면 아니오 | 예 |
@@ -71,7 +71,12 @@ hook은 임의 shell script가 아니라 **CLI/TUI의 내장 인증 조정 흐�
 ## 4. CLI 계약
 
 ```sh
-bwb --help
+bwb item list --profile work --search github
+bwb item list --profile work --search github --sync --format json
+bwb item read ITEM --profile work
+bwb item read ITEM --profile work --field password
+bwb item read ITEM --profile work --reveal --format json
+bwb item totp ITEM --profile work
 bwb tui --profile work
 bwb status --profile work
 bwb login --profile work
@@ -79,29 +84,29 @@ bwb unlock --profile work
 bwb lock --profile work
 bwb logout --profile work
 bwb sync --profile work
-bwb item list --profile work --search github --format json
-bwb item get ITEM_ID --profile work
-bwb item get ITEM_ID --profile work --reveal --format json
-bwb read 'bwb://work/ITEM_ID/login/password'
-bwb read 'bwb://work/ITEM_ID/fields/api_token'
 bwb profile list
 bwb profile show work
-bwb profile use work
 bwb config path
 bwb config validate
 bwb daemon status
+bwb daemon update
 bwb daemon stop
 ```
 
+- 탐색·상세·값 읽기는 `item` 아래로 통일한다. 루트 `read`, `item get`, positional field, `bwb://` reference와 타입 접두사 필드 경로는 제공하지 않는다. 호환 alias도 없다.
 - 인자 없음은 help. TUI는 명시적으로 시작한다. status/daemon status는 daemon을 시작하지 않는다. 다른 작업은 필요하면 시작한다.
-- profile 우선순위는 `--profile > BWB_PROFILE > default_profile`. 없는 profile은 오류. URI의 profile과 명시적 flag/env가 충돌하면 오류이며 default profile은 무시한다.
-- ID는 UUID. 이름 검색은 탐색용이며 중복 이름을 첫 결과로 조용히 해결하지 않는다.
-- reference는 `bwb://PROFILE/UUID/login/password`, `.../login/username`, `.../notes`, `.../fields/NAME`부터 지원한다. segment는 한 번만 percent decode하고 중복 custom field 이름은 ambiguity 오류다.
-- 목록은 ID/name/type/folder/favorite. 상세는 password/TOTP seed/hidden field/notes/카드·신원 정보를 기본 마스킹한다. JSON 선택 자체는 reveal을 뜻하지 않는다.
-- read는 명시적인 원문 출력 요청이다. 줄바꿈을 추가하지 않으며 빈 값은 성공, 없는 필드는 오류다.
-- stdout은 결과만, stderr는 진단만. JSON 결과는 `{version: 1, data: ...}`, JSON 오류는 stderr의 `{code, message}`다. backend 오류 원문을 노출하지 않는다.
-- 종료 코드: 0 성공, 1 backend/내부 실패, 2 입력/config 오류, 3 인증 필요/실패, 4 item/field 없음, 5 모호한 선택, 130 취소. RPC 오류 코드는 CLI에서 매핑한다.
-- logout은 선택 profile의 로컬 cache만 삭제한다. 원격 vault item은 삭제하지 않는다. 복수 profile 전체 logout/purge는 첫 범위에서 제외한다.
+- profile 우선순위는 `--profile > BWB_PROFILE > default_profile > default`다.
+- `ITEM`은 UUID 또는 대소문자를 무시한 정확한 이름이다. 부분 검색은 `item list --search`에서 수행한다. 동명 항목은 후보 ID와 소속을 표시하고 오류로 끝낸다. 첫 결과를 자동 선택하지 않는다.
+- `item read ITEM`은 소속 metadata와 필드 키·label·값을 함께 표시한다. 사용자명·URL·카드 brand·일반 custom field는 표시하고 password/TOTP seed/hidden field/notes/나머지 카드·신원 정보는 기본 마스킹한다. 상세 하단에서 단일 값·reveal·TOTP의 다음 명령을 안내한다.
+- 필드 키는 `username`, `password`, `notes`, `url/1`, `custom/token` 등이다. Custom 이름은 percent encode하며 동명 custom field는 suffix로 구분한다. 사용자에게 키를 추측하게 하지 않고 상세 화면에 표시한 키를 그대로 받는다.
+- `--field KEY`는 원문 값 하나를 줄바꿈 추가 없이 출력한다. 빈 값은 성공, 없는 필드는 사용 가능한 키와 함께 오류다. `--reveal`은 상세 전체의 숨겨진 값을 표시한다. 두 옵션은 함께 사용하지 않는다.
+- `item totp ITEM`은 현재 인증 코드만 출력한다. `--field totp-secret`은 별도의 명시적 seed 추출이다. RFC 6238 SHA1/SHA256/SHA512, 6/8자리, Base32 및 otpauth URI를 지원한다. HOTP/Steam은 범위 밖이다.
+- 조회는 cache가 기본이다. `--sync`를 붙인 경우에만 먼저 sync한다. 목록 0건은 cache 기준의 결과와 sync 힌트를 표시하고 성공한다.
+- 상세/TOTP JSON은 `{version: 1, data: {item, fields, restriction?}}`다. 필드는 `key`, `label`, `sensitive`, `state`, `value`를 갖는다. 숨김은 `hidden/null`, 빈 값은 `empty/""`, 표시값은 `visible/string`으로 구분한다. JSON 선택 자체는 reveal을 뜻하지 않는다. 목록 JSON의 data는 배열이다.
+- 상세는 daemon의 단일 profile 작업 안에서 같은 snapshot으로 조회한다. JSON 응답이 48,000 bytes를 넘으면 부분 출력 없이 실패하고 `--field`를 안내한다. 단일 필드도 한도를 넘으면 실패한다.
+- reprompt/조직의 조회 제한은 field/reveal/TOTP에도 적용한다. 전체 상세는 metadata와 제한 사유만 표시하며 명시적 비밀 조회는 오류다.
+- stdout은 결과, stderr는 진단이다. 현재 오류는 텍스트와 종료 코드 1을 사용한다. 오류별 구조화 JSON/종료 코드 세분화는 아직 없다.
+- logout은 선택 profile의 로컬 cache와 credential을 삭제한다. 원격 vault item은 삭제하지 않는다.
 
 ### 조직·folder·collection 계약 (목록 구현 전 확정)
 
@@ -189,7 +194,7 @@ CLI / TUI ─ typed local RPC ─ vault service
 - DB/config/log/argv에 plaintext 비밀번호·복호화 키·token·API Key·vault 값 없음. refresh token과 API Key의 영속 저장은 OS credential store만 사용. logout 뒤 cache/credential 접근 불가.
 - 중복 이름, 빈 값, Unicode, 여러 줄 notes, hidden field, card/identity 기본 마스킹, RPC 크기 초과.
 
-현재 Go API의 login/refresh/sync/8종 복호화와 Cobra → daemon RPC를 snapshot 서버에서 검증한다. profile별 키·토큰은 memguard locked memory, snapshot은 암호문으로 메모리에 유지한다. read는 HTTP 없이 동작하며 lock/shutdown은 진행 중 작업을 취소하고 세션을 파기한다. 임시 crypto/HTTP/RPC 평문 복사본까지 완전히 zeroize하지는 않는다. `main.go`는 root, 패키지는 `cli`, `vaultapi`, `daemon`, `vault`, `bitwarden`으로 나눈다. keychain refresh token과 SQLite 암호화 cache 저장, HTTP 없는 unlock, 로컬 logout을 구현했다. `lock`은 메모리만 파기하고 재시작 후 비밀번호로 unlock한다. SQLite/keychain 간 작업은 credential 정리 목록으로 복구하며, logout 실패 시 표시를 저장하고 unlock을 막는다. CLI 공통 실행부의 인증 후 원래 read/list/sync 1회 재시도까지 구현했다. 서비스의 AuthRequired/ErrStateChanged는 daemon에서 RPC 코드로 바꾸며 일반 장애는 그대로 전달한다. 자동 인증 예약은 연결 감시·취소·lock 및 2분 만료로 정리하고, 대기자는 prompt를 중복 생성하지 않는다. TUI·Argon2id·2FA는 후속이다. 테스트는 전용 서버·계정만 사용한다.
+현재 Go API의 login/refresh/sync/8종 복호화와 Cobra → daemon RPC를 snapshot 서버에서 검증한다. profile별 키·토큰은 memguard locked memory, snapshot은 암호문으로 메모리에 유지한다. read는 HTTP 없이 동작하며 lock/shutdown은 진행 중 작업을 취소하고 세션을 파기한다. 임시 crypto/HTTP/RPC 평문 복사본까지 완전히 zeroize하지는 않는다. `main.go`는 root, 패키지는 `cli`, `vaultapi`, `daemon`, `vault`, `bitwarden`으로 나눈다. keychain refresh token과 SQLite 암호화 cache 저장, HTTP 없는 unlock, 로컬 logout을 구현했다. `lock`은 메모리만 파기하고 재시작 후 비밀번호로 unlock한다. SQLite/keychain 간 작업은 credential 정리 목록으로 복구하며, logout 실패 시 표시를 저장하고 unlock을 막는다. CLI 공통 실행부의 인증 후 원래 read/list/sync 1회 재시도까지 구현했다. 서비스의 AuthRequired/ErrStateChanged는 daemon에서 RPC 코드로 바꾸며 일반 장애는 그대로 전달한다. 자동 인증 예약은 연결 감시·취소·lock 및 2분 만료로 정리하고, 대기자는 prompt를 중복 생성하지 않는다. Argon2id·2FA는 후속이다. 테스트는 전용 서버·계정만 사용한다.
 
 ## 9. 참고한 인터페이스와 근거
 
@@ -197,7 +202,7 @@ CLI / TUI ─ typed local RPC ─ vault service
 | --- | --- |
 | [rbw](https://github.com/doy/rbw#usage) | login/unlock 분리, agent의 키 보관, 명령 전 인증 확보 |
 | [Vault](https://developer.hashicorp.com/vault/docs/commands) | 일관된 명령·구조화 출력 |
-| [1Password](https://developer.1password.com/docs/cli/secret-references/) | item 탐색과 secret reference/read 분리 |
+| [1Password](https://developer.1password.com/docs/cli/secret-references/) | 명시적 비밀값 선택; CLI에서는 item 아래의 field 옵션으로 제공 |
 | [age](https://github.com/FiloSottile/age) | stdin/stdout 조합, 작은 명령 표면 |
 | [fnox](https://fnox.jdx.dev/guide/profiles.html) | TOML, 명시적 profile 선택 |
 

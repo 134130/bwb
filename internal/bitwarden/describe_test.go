@@ -28,7 +28,7 @@ func TestDescribeDecryptsOnlyLabelsAndHonorsRestrictions(t *testing.T) {
 		t.Fatal(err)
 	}
 	encoded, _ := json.Marshal(fields)
-	if strings.Contains(string(encoded), "INVALID") || !strings.Contains(string(encoded), "fields/service/token") || !strings.Contains(string(encoded), "login/uris/0") {
+	if strings.Contains(string(encoded), "INVALID") || !strings.Contains(string(encoded), "custom/service%2Ftoken") || !strings.Contains(string(encoded), "login/uris/0") {
 		t.Fatal(string(encoded))
 	}
 	item["viewPassword"] = false

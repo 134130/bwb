@@ -95,24 +95,6 @@ func NewRoot() *cobra.Command {
 		_, err = client.Invoke(cmd.Context(), vaultapi.Logout, vaultapi.ProfileRequest{Profile: profile})
 		return err
 	}}
-	read := &cobra.Command{Use: "read ITEM_ID FIELD", Short: "Read a cached field without contacting the server", Args: cobra.ExactArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if id, err := uuid.Parse(args[0]); err != nil || id == uuid.Nil || id.String() != args[0] {
-				return errors.New("invalid item ID")
-			}
-			client, err := connectCommand(cmd)
-			if err != nil {
-				return err
-			}
-			defer client.Close()
-			execution := executor{Client: client, Prompt: interactivePrompt(cmd, nonInteractive)}
-			result, err := execution.Read(cmd.Context(), vaultapi.ReadRequest{Profile: profile, ID: args[0], Field: args[1]})
-			if err != nil {
-				return err
-			}
-			_, err = io.WriteString(cmd.OutOrStdout(), result.Value)
-			return err
-		}}
 	sync := &cobra.Command{Use: "sync", Short: "Refresh the encrypted snapshot", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, err := connectCommand(cmd)
@@ -222,7 +204,7 @@ func NewRoot() *cobra.Command {
 	}
 	configuration, profiles := configCommands()
 	root.AddCommand(configuration, profiles, tuiCommand(&profile, &nonInteractive))
-	root.AddCommand(login, unlock, logout, read, sync, lock, status, control)
+	root.AddCommand(login, unlock, logout, sync, lock, status, control)
 	return root
 }
 

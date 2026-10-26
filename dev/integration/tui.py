@@ -110,7 +110,7 @@ def main():
             send('\r')
             until(lambda: 'Enter reveals selected field' in view())
             for _ in range(10):
-                if any('> password ' in line[60:] for line in screen.display):
+                if any('> Password ' in line[60:] for line in screen.display):
                     break
                 send('\x1b[B')
                 pause()
@@ -127,7 +127,7 @@ def main():
             assert any('>' in line[:60] and 'GitHub (demo)' in line[:60] for line in screen.display)
             # Refresh resets field selection; explicitly select password again.
             for _ in range(10):
-                if any('> password ' in line[60:] for line in screen.display):
+                if any('> Password ' in line[60:] for line in screen.display):
                     break
                 send('\x1b[B')
                 pause()

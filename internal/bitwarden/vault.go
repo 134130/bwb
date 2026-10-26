@@ -346,8 +346,15 @@ func (v *Vault) Read(id, path string) (string, error) {
 			return "", ErrNotFound
 		}
 		kind, fieldName, found := strings.Cut(path, "/")
-		if !found || fieldName == "" {
+		if !found {
 			return "", errors.New("expected TYPE/FIELD, fields/NAME, name, or notes")
+		}
+		if kind == "custom" {
+			index, err := strconv.Atoi(fieldName)
+			if err != nil || index < 0 || index >= len(item.Fields) || item.Fields[index].Value == nil {
+				return "", ErrNotFound
+			}
+			return *item.Fields[index].Value, nil
 		}
 		if kind == "fields" {
 			var matches []*string
@@ -399,25 +406,33 @@ func (v *Vault) Read(id, path string) (string, error) {
 
 // Read decrypts only the requested item from a previously validated snapshot.
 func (s *Session) Read(snapshot *Snapshot, id, path string) (string, error) {
+	item, err := s.readItem(snapshot, id)
+	if err != nil {
+		return "", err
+	}
+	return (&Vault{Items: []Item{item}}).Read(id, path)
+}
+
+func (s *Session) readItem(snapshot *Snapshot, id string) (Item, error) {
 	if !s.active() {
-		return "", ErrAuthentication
+		return Item{}, ErrAuthentication
 	}
 	if !validID(id) {
-		return "", errors.New("invalid item ID")
+		return Item{}, errors.New("invalid item ID")
 	}
 	if snapshot == nil || snapshot.profile.ID != s.accountID || snapshot.profile.Key != s.protectedKey {
-		return "", errors.New("snapshot does not match session")
+		return Item{}, errors.New("snapshot does not match session")
 	}
 	raw, ok := snapshot.items[id]
 	if !ok {
-		return "", ErrNotFound
+		return Item{}, ErrNotFound
 	}
 	// Resolve only the requested item's organization; personal reads do no RSA work.
 	var envelope struct {
 		OrganizationID *string `json:"organizationId"`
 	}
 	if json.Unmarshal(raw, &envelope) != nil {
-		return "", errors.New("invalid item")
+		return Item{}, errors.New("invalid item")
 	}
 	profile := snapshot.profile
 	profile.Organizations = nil
@@ -431,14 +446,14 @@ func (s *Session) Read(snapshot *Snapshot, id, path string) (string, error) {
 	}
 	keys, err := s.organizationKeys(context.Background(), profile)
 	if err != nil {
-		return "", err
+		return Item{}, err
 	}
 	defer keys.close()
 	item, err := s.decryptOwnedItem(raw, keys)
 	if err != nil {
-		return "", err
+		return Item{}, err
 	}
-	return (&Vault{Items: []Item{item}}).Read(id, path)
+	return item, nil
 }
 
 func decryptItemKey(encrypted *string, ownerKey []byte) ([]byte, error) {

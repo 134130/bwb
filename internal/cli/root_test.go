@@ -16,12 +16,17 @@ func TestHelpAndInputErrors(t *testing.T) {
 	var help bytes.Buffer
 	root.SetOut(&help)
 	root.SetArgs([]string{"--help"})
-	if err := root.Execute(); err != nil || !strings.Contains(help.String(), "read") {
+	if err := root.Execute(); err != nil || !strings.Contains(help.String(), "item") || strings.Contains(help.String(), "\n  read ") {
 		t.Fatal("Cobra help failed", err)
 	}
 	for _, args := range [][]string{
 		{"read"},
 		{"read", "bad", "login/password"},
+		{"item", "read"},
+		{"item", "read", "id", "password"},
+		{"item", "read", "id", "--field", ""},
+		{"item", "read", "id", "--field", "password", "--reveal"},
+		{"item", "read", "id", "--format", "xml"},
 		{"login"},
 		{"login", "--server", "https://example.invalid", "--email", "user@example.invalid"},
 	} {

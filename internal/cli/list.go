@@ -18,8 +18,12 @@ import (
 
 func listCommand(kind string, profile *string, nonInteractive *bool) *cobra.Command {
 	parent := &cobra.Command{Use: kind, Short: "Browse cached " + kind + " metadata"}
+	if kind == "item" {
+		parent.Short = "Search items, inspect fields and read values or TOTP codes"
+	}
 	req := vaultapi.ListRequest{Kind: kind}
 	var format, group string
+	var syncFirst bool
 	list := &cobra.Command{Use: "list", Short: "List cached metadata without contacting the server", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if format != "table" && format != "json" {
@@ -38,6 +42,11 @@ func listCommand(kind string, profile *string, nonInteractive *bool) *cobra.Comm
 			}
 			defer client.Close()
 			execution := executor{Client: client, Prompt: interactivePrompt(cmd, *nonInteractive)}
+			if syncFirst {
+				if _, err := execution.Sync(cmd.Context(), vaultapi.ProfileRequest{Profile: *profile}); err != nil {
+					return err
+				}
+			}
 			entries, err := execution.List(cmd.Context(), req)
 			if err != nil {
 				return err
@@ -48,6 +57,7 @@ func listCommand(kind string, profile *string, nonInteractive *bool) *cobra.Comm
 			return writeList(cmd.OutOrStdout(), kind, format, group, entries)
 		}}
 	list.Flags().StringVar(&req.Search, "search", "", "Case-insensitive substring in names")
+	list.Flags().BoolVar(&syncFirst, "sync", false, "Sync before searching")
 	list.Flags().StringSliceVar(&req.Sort, "sort", []string{"name"}, "Sort keys, comma-separated (name; items also type,folder,organization)")
 	list.Flags().BoolVar(&req.Reverse, "reverse", false, "Reverse sort keys; ties retain ID order")
 	list.Flags().StringVar(&format, "format", "table", "Output format: table or json")
@@ -60,6 +70,9 @@ func listCommand(kind string, profile *string, nonInteractive *bool) *cobra.Comm
 		list.Flags().StringVar(&group, "group-by", "", "Group table by folder, organization, or collection (JSON stays flat)")
 	}
 	parent.AddCommand(list)
+	if kind == "item" {
+		parent.AddCommand(itemCommand(false, profile, nonInteractive), itemCommand(true, profile, nonInteractive))
+	}
 	return parent
 }
 
@@ -79,7 +92,11 @@ func writeList(out io.Writer, kind, format, group string, entries []vaultapi.Lis
 			Data    []vaultapi.ListEntry `json:"data"`
 		}{1, entries})
 	}
-	if group == "" || len(entries) == 0 {
+	if len(entries) == 0 {
+		_, err := fmt.Fprintf(out, "No matching %s entries in the cached vault. Retry with --sync to refresh.\n", kind)
+		return err
+	}
+	if group == "" {
 		return writeListTable(out, kind, entries)
 	}
 	type section struct {
@@ -176,7 +193,7 @@ func writeListTable(out io.Writer, kind string, entries []vaultapi.ListEntry) er
 			if entry.Favorite {
 				favorite = "*"
 			}
-			cells = append(cells, display(entry.Type), name(entry.Organization), name(entry.Folder), collections, favorite)
+			cells = append(cells, display(itemType(entry.Type)), name(entry.Organization), name(entry.Folder), collections, favorite)
 		case "collection":
 			cells = append(cells, name(entry.Organization))
 		}

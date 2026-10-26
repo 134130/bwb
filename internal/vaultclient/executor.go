@@ -18,6 +18,11 @@ type Executor struct {
 	Prompt PasswordPrompt
 }
 
+func (e Executor) Item(ctx context.Context, req vaultapi.ItemRequest) (vaultapi.ItemResponse, error) {
+	return execute(ctx, func() (vaultapi.ItemResponse, error) { return e.Client.Invoke(ctx, vaultapi.Item, req) },
+		func(err error) error { return e.authenticate(ctx, req.Profile, err) })
+}
+
 // Read, List and Sync opt into authentication recovery. Output happens after this returns.
 func (e Executor) Read(ctx context.Context, req vaultapi.ReadRequest) (vaultapi.ReadResponse, error) {
 	return execute(ctx, func() (vaultapi.ReadResponse, error) { return e.Client.Invoke(ctx, vaultapi.Read, req) },

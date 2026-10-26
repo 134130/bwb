@@ -5,12 +5,31 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
+	"strings"
+	"unicode"
 )
 
 // FieldInfo contains discoverable labels and read paths, never field values.
 type FieldInfo struct {
-	Path  string `json:"path"`
-	Label string `json:"label"`
+	Path      string `json:"path"`
+	Key       string `json:"key"`
+	Label     string `json:"label"`
+	Sensitive bool   `json:"sensitive"`
+}
+
+func fieldLabel(name string) string {
+	var label strings.Builder
+	for i, r := range name {
+		if i == 0 {
+			r = unicode.ToUpper(r)
+		} else if unicode.IsUpper(r) {
+			label.WriteByte(' ')
+			r = unicode.ToLower(r)
+		}
+		label.WriteRune(r)
+	}
+	return label.String()
 }
 
 func (s *Session) Describe(ctx context.Context, snapshot *Snapshot, id string) ([]FieldInfo, error) {
@@ -51,11 +70,18 @@ func (s *Session) Describe(ctx context.Context, snapshot *Snapshot, id string) (
 	}
 	fields := []FieldInfo{}
 	if item.Notes != nil {
-		fields = append(fields, FieldInfo{"notes", "Notes"})
+		fields = append(fields, FieldInfo{Path: "notes", Key: "notes", Label: "Notes", Sensitive: true})
 	}
 	for _, name := range encryptedFields[item.Type] {
 		if value := data[name]; len(value) > 0 && string(value) != "null" {
-			fields = append(fields, FieldInfo{kind + "/" + name, name})
+			field := FieldInfo{Path: kind + "/" + name, Key: name, Label: fieldLabel(name), Sensitive: true}
+			if kind == "login" && name == "username" || kind == "card" && name == "brand" {
+				field.Sensitive = false
+			}
+			if kind == "login" && name == "totp" {
+				field.Key, field.Label = "totp-secret", "TOTP seed"
+			}
+			fields = append(fields, field)
 		}
 	}
 	if item.Type == 1 && data["uris"] != nil {
@@ -65,7 +91,7 @@ func (s *Session) Describe(ctx context.Context, snapshot *Snapshot, id string) (
 		}
 		for i, uri := range uris {
 			if value := uri["uri"]; len(value) > 0 && string(value) != "null" {
-				fields = append(fields, FieldInfo{fmt.Sprintf("login/uris/%d", i), fmt.Sprintf("URI %d", i+1)})
+				fields = append(fields, FieldInfo{Path: fmt.Sprintf("login/uris/%d", i), Key: fmt.Sprintf("url/%d", i+1), Label: fmt.Sprintf("URL %d", i+1)})
 			}
 		}
 	}
@@ -101,7 +127,8 @@ func (s *Session) Describe(ctx context.Context, snapshot *Snapshot, id string) (
 		return nil, err
 	}
 	defer clear(key)
-	for _, field := range item.Fields {
+	customCounts := map[string]int{}
+	for i, field := range item.Fields {
 		if field.Name == nil {
 			continue
 		}
@@ -110,7 +137,14 @@ func (s *Session) Describe(ctx context.Context, snapshot *Snapshot, id string) (
 			return nil, err
 		}
 		if field.Value != nil {
-			fields = append(fields, FieldInfo{"fields/" + name, name})
+			key := "custom/" + url.PathEscape(name)
+			customCounts[key]++
+			fields = append(fields, FieldInfo{Path: fmt.Sprintf("custom/%d", i), Key: key, Label: name, Sensitive: field.Type == 1})
+		}
+	}
+	for i := range fields {
+		if customCounts[fields[i].Key] > 1 {
+			fields[i].Key += "#" + strings.TrimPrefix(fields[i].Path, "custom/")
 		}
 	}
 	return fields, nil

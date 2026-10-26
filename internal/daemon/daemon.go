@@ -102,6 +102,9 @@ func Run(ctx context.Context, configFlag string) error {
 	if err := app.Handle(vaultapi.Read, rpcHandler(service.Read)); err != nil {
 		return err
 	}
+	if err := app.Handle(vaultapi.Item, rpcHandler(service.Item)); err != nil {
+		return err
+	}
 	if err := app.Handle(vaultapi.Sync, rpcHandler(service.Sync)); err != nil {
 		return err
 	}

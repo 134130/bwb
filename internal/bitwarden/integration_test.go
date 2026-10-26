@@ -120,11 +120,24 @@ func TestSnapshotIntegration(t *testing.T) {
 		for _, field := range fields {
 			expected, err := vault.Read(item.ID, field.Path)
 			if err != nil {
-				continue
-			} // Ambiguous custom names remain explicit read errors.
+				t.Fatal("unreadable discovered field", item.Type, field.Path, err)
+			}
 			actual, err := session.Read(snapshot, item.ID, field.Path)
 			if err != nil || actual != expected {
 				t.Fatal("described field read", item.Type, field.Path, err)
+			}
+			selected, err := session.Inspect(ctx, snapshot, item.ID, field.Key, false)
+			if err != nil || len(selected.Fields) != 1 || selected.Fields[0].Value == nil || *selected.Fields[0].Value != expected {
+				t.Fatal("public field key read", item.Type, field.Key, err)
+			}
+		}
+		details, err := session.Inspect(ctx, snapshot, item.ID, "", false)
+		if err != nil || len(details.Fields) != len(fields)+1 {
+			t.Fatal("item details", item.Type, err)
+		}
+		for _, field := range details.Fields {
+			if field.Sensitive && (field.State != "hidden" || field.Value != nil) {
+				t.Fatal("sensitive field exposed", item.Type, field.Key)
 			}
 		}
 	}

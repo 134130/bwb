@@ -104,15 +104,8 @@ func (s *Service) List(ctx context.Context, req ListRequest) (ListResponse, erro
 	if p.session == nil {
 		return ListResponse{}, s.authRequired(ctx, p, req.Profile, "unlock")
 	}
-	if p.catalog == nil {
-		catalog, err := p.session.Catalog(ctx, p.snapshot)
-		if err != nil {
-			return ListResponse{}, err
-		}
-		if err := ctx.Err(); err != nil {
-			return ListResponse{}, err
-		}
-		p.catalog, p.catalogID = catalog, uuid.NewString()
+	if err := s.loadCatalog(ctx, p); err != nil {
+		return ListResponse{}, err
 	}
 	response, err := listPage(p.catalog, p.catalogID, req)
 	if err != nil {

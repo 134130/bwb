@@ -233,15 +233,40 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	}
 
 	for _, tc := range []struct{ fixtureID, path, want string }{
-		{"20000000-0000-4000-8000-000000000001", "login/password", "DEMO-only-password-1!"},
-		{"20000000-0000-4000-8000-000000000005", "login/password", ""},
+		{"20000000-0000-4000-8000-000000000001", "password", "DEMO-only-password-1!"},
+		{"20000000-0000-4000-8000-000000000005", "password", ""},
 		{"20000000-0000-4000-8000-000000000006", "notes", "DEMO-0001\nDEMO-0002\n"},
 	} {
-		must("", tc.want, "read", manifest.Items[tc.fixtureID], tc.path)
+		must("", tc.want, "item", "read", manifest.Items[tc.fixtureID], "--field", tc.path)
 	}
 	for _, org := range manifest.Organizations.Entries {
-		must("", "DEMO-org-multi!", "read", org.Items[0].ID, "login/password")
+		must("", "DEMO-org-multi!", "item", "read", org.Items[0].ID, "--field", "password")
 	}
+	// Details discover field keys without returning hidden values; explicit selection returns raw data.
+	if output, err := run("", "item", "read", "GitHub (demo)"); err != nil || !strings.Contains(output, "developer@example.invalid") || !strings.Contains(output, "--field") || strings.Contains(output, "DEMO-only-password-1!") {
+		t.Fatal("item details or masking failed", err)
+	}
+	must("", "DEMO-only-password-1!", "item", "read", "github (DEMO)", "--field", "password")
+	if output, err := run("", "item", "read", "GitHub (demo)", "--format", "json"); err != nil || strings.Contains(output, "DEMO-only-password-1!") || !strings.Contains(output, `"state":"hidden"`) {
+		t.Fatal("JSON details revealed a hidden value", err)
+	}
+	if output, err := run("", "item", "read", "GitHub (demo)", "--reveal", "--format", "json"); err != nil || !strings.Contains(output, "DEMO-only-password-1!") {
+		t.Fatal("explicit reveal failed", err)
+	}
+	if output, err := run("", "item", "read", "Demo Shared Login"); err == nil || !strings.Contains(output, "use an ID") {
+		t.Fatal("duplicate name was silently selected", err)
+	}
+	if output, err := run("", "item", "read", "GitHub (demo)", "--field", "login/password"); err == nil || !strings.Contains(output, "available fields") {
+		t.Fatal("legacy field path accepted or no discovery guidance", err)
+	}
+	if _, err := run("", "read", "unused", "login/password"); err == nil {
+		t.Fatal("removed root read command still exists")
+	}
+	code, err := run("", "item", "totp", "OTP (public test seed)")
+	if err != nil || len(code) != 6 || strings.Trim(code, "0123456789") != "" {
+		t.Fatal("TOTP command did not return a code", err)
+	}
+	must("", "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", "item", "read", "OTP (public test seed)", "--field", "totp-secret")
 	if requests.Load() != before {
 		t.Fatal("cached reads made HTTP requests")
 	}
@@ -249,9 +274,11 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 		t.Fatal("offline sync succeeded")
 	}
 	id := manifest.Items["20000000-0000-4000-8000-000000000001"]
-	must("", "DEMO-only-password-1!", "read", id, "login/password")
+	must("", "DEMO-only-password-1!", "item", "read", id, "--field", "password")
 	offline.Store(false)
-	must("", "", "sync")
+	if _, err := run("", "item", "list", "--search", "GitHub", "--sync", "--format", "json"); err != nil {
+		t.Fatal("search with sync failed", err)
+	}
 	before = requests.Load()
 	if _, err := run(manifest.Password+"\n", "login", "--server", endpoint.URL, "--email", "other@example.invalid", "--password-stdin"); err == nil {
 		t.Fatal("profile rebound without logout")
@@ -262,7 +289,7 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	if _, err := run("wrong-password\n", login...); err == nil {
 		t.Fatal("bad login succeeded")
 	}
-	must("", "DEMO-only-password-1!", "read", id, "login/password")
+	must("", "DEMO-only-password-1!", "item", "read", id, "--field", "password")
 	must(manifest.Password+"\n", "", append([]string{"--profile", "other"}, login...)...)
 	// Lock must cancel an in-flight replacement login and forbid late publication.
 	pauseSync.Store(true)
@@ -275,7 +302,7 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	}
 	must("", "", "lock")
 	for _, org := range manifest.Organizations.Entries {
-		if output, err := run("", "read", org.Items[0].ID, "login/password"); err == nil || strings.Contains(output, "DEMO-org-multi!") {
+		if output, err := run("", "item", "read", org.Items[0].ID, "--field", "password"); err == nil || strings.Contains(output, "DEMO-org-multi!") {
 			t.Fatal("organization read survived lock", err)
 		}
 	}
@@ -289,14 +316,14 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	}
 	pauseSync.Store(false)
 	must("", "locked\n", "status")
-	if output, err := run("", "read", id, "login/password"); err == nil || !strings.Contains(output, "vault locked") {
+	if output, err := run("", "item", "read", id, "--field", "password"); err == nil || !strings.Contains(output, "vault locked") {
 		t.Fatal("read survived lock", err, output)
 	}
-	must("", "DEMO-only-password-1!", "--profile", "other", "read", id, "login/password")
+	must("", "DEMO-only-password-1!", "--profile", "other", "item", "read", id, "--field", "password")
 	must("", "", "daemon", "stop")
 	must("", "stopped\n", "status")
 	// read starts a fresh daemon, which must have no previous profile keys.
-	if output, err := run("", "--profile", "other", "read", id, "login/password"); err == nil || !strings.Contains(output, "vault locked") {
+	if output, err := run("", "--profile", "other", "item", "read", id, "--field", "password"); err == nil || !strings.Contains(output, "vault locked") {
 		t.Fatal("session survived restart", err, output)
 	}
 	offline.Store(true)
@@ -306,9 +333,9 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	}
 	must("", "locked\n", "status")
 	must(manifest.Password+"\n", "", "unlock", "--password-stdin")
-	must("", "DEMO-only-password-1!", "read", id, "login/password")
+	must("", "DEMO-only-password-1!", "item", "read", id, "--field", "password")
 	for _, org := range manifest.Organizations.Entries {
-		must("", "DEMO-org-multi!", "read", org.Items[0].ID, "login/password")
+		must("", "DEMO-org-multi!", "item", "read", org.Items[0].ID, "--field", "password")
 	}
 	if len(list("item")) != len(all) {
 		t.Fatal("offline restart list failed")
@@ -326,9 +353,15 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	}
 	must(manifest.Password+"\n", "", "--profile", "restricted", "login", "--server", endpoint.URL, "--email", manifest.Organizations.RestrictedEmail, "--password-stdin")
 	for _, org := range manifest.Organizations.Entries {
-		must("", "DEMO-org-multi!", "--profile", "restricted", "read", org.Items[0].ID, "login/password")
-		if output, err := run("", "--profile", "restricted", "read", org.Items[1].ID, "login/password"); err == nil || !strings.Contains(output, "restricted") || strings.Contains(output, "DEMO-org-hidden!") {
+		must("", "DEMO-org-multi!", "--profile", "restricted", "item", "read", org.Items[0].ID, "--field", "password")
+		if output, err := run("", "--profile", "restricted", "item", "read", org.Items[1].ID, "--field", "password"); err == nil || !strings.Contains(output, "restricted") || strings.Contains(output, "DEMO-org-hidden!") {
 			t.Fatal("restricted secret exposed", err)
+		}
+		if output, err := run("", "--profile", "restricted", "item", "read", org.Items[1].ID, "--reveal", "--format", "json"); err != nil || !strings.Contains(output, `"restriction":`) || !strings.Contains(output, `"fields":[]`) || strings.Contains(output, "DEMO-org-hidden!") {
+			t.Fatal("reveal bypassed organization restriction", err)
+		}
+		if _, err := run("", "--profile", "restricted", "item", "totp", org.Items[1].ID); err == nil {
+			t.Fatal("TOTP bypassed organization restriction")
 		}
 	}
 	restrictedItems := list("item", "--profile", "restricted")
@@ -365,14 +398,14 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	tuiTerminal("explorer")
 	must("", "", "lock")
 	terminal("no_prompt", "", "--non-interactive", "item", "list")
-	terminal("no_prompt", "", "--non-interactive", "read", id, "login/password")
+	terminal("no_prompt", "", "--non-interactive", "item", "read", id, "--field", "password")
 	for _, scenario := range []string{"wrong", "long", "cancel", "signal", "lock", "cancel_waiters"} {
-		terminal(scenario, "", "read", id, "login/password")
+		terminal(scenario, "", "item", "read", id, "--field", "password")
 		must("", "locked\n", "status")
 	}
 	offline.Store(true)
 	before = requests.Load()
-	terminal("concurrent", "DEMO-only-password-1!", "read", id, "login/password")
+	terminal("concurrent", "DEMO-only-password-1!", "item", "read", id, "--field", "password")
 	listOutput, err := run("", "item", "list", "--format", "json")
 	if err != nil {
 		t.Fatal(err)
@@ -393,7 +426,7 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 		t.Fatal("rejected refresh did not require login")
 	}
 	before = requests.Load()
-	must("", "DEMO-only-password-1!", "read", id, "login/password")
+	must("", "DEMO-only-password-1!", "item", "read", id, "--field", "password")
 	if requests.Load() != before {
 		t.Fatal("cached read checked expired authentication")
 	}
@@ -410,7 +443,7 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 		t.Fatal("logout preserved local unlock")
 	}
 	must(manifest.Password+"\n", "", "--profile", "other", "unlock", "--password-stdin")
-	must("", "DEMO-only-password-1!", "--profile", "other", "read", id, "login/password")
+	must("", "DEMO-only-password-1!", "--profile", "other", "item", "read", id, "--field", "password")
 	must("", "", "daemon", "stop")
 	if _, err := run(manifest.Password+"\n", "unlock", "--password-stdin"); err == nil {
 		t.Fatal("logout did not survive restart")
@@ -418,7 +451,7 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	// Personal API keys must survive restart without relying on refresh tokens or launcher environment.
 	apiLogin := []string{"--profile", "api", "login", "--server", endpoint.URL, "--apikey", "--password-stdin"}
 	must(manifest.Password+"\n", "", apiLogin...)
-	must("", "DEMO-only-password-1!", "--profile", "api", "read", id, "login/password")
+	must("", "DEMO-only-password-1!", "--profile", "api", "item", "read", id, "--field", "password")
 	apiBefore := apiKeyRequests.Load()
 	expireAPIKey.Store(true)
 	must("", "", "--profile", "api", "sync")
@@ -429,7 +462,7 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	offline.Store(true)
 	before = requests.Load()
 	must(manifest.Password+"\n", "", "--profile", "api", "unlock", "--password-stdin")
-	must("", "DEMO-only-password-1!", "--profile", "api", "read", id, "login/password")
+	must("", "DEMO-only-password-1!", "--profile", "api", "item", "read", id, "--field", "password")
 	if requests.Load() != before {
 		t.Fatal("API key offline unlock contacted server")
 	}
@@ -442,7 +475,7 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	if _, err := run("wrong\n", apiLogin...); err == nil {
 		t.Fatal("API login accepted wrong master password")
 	}
-	must("", "DEMO-only-password-1!", "--profile", "api", "read", id, "login/password")
+	must("", "DEMO-only-password-1!", "--profile", "api", "item", "read", id, "--field", "password")
 	must("", "", "--profile", "api", "lock")
 	terminal("success", "", "--profile", "api", "unlock")
 	rejectAPIKey.Store(true)
@@ -450,7 +483,7 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 		t.Fatal("API key revocation not reported", err)
 	}
 	terminal("no_prompt", "", "--profile", "api", "sync")
-	must("", "DEMO-only-password-1!", "--profile", "api", "read", id, "login/password")
+	must("", "DEMO-only-password-1!", "--profile", "api", "item", "read", id, "--field", "password")
 	rejectAPIKey.Store(false)
 	terminal("apikey", "", "--profile", "api", "login", "--apikey", "--server", endpoint.URL)
 	must("", "", "--profile", "api", "logout")
@@ -495,7 +528,7 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	must("", "unlocked\n", "--profile", "steady", "status")
 	offline.Store(true)
 	before = requests.Load()
-	terminal("success", "DEMO-only-password-1!", "--config", configPath, "read", id, "login/password")
+	terminal("success", "DEMO-only-password-1!", "--config", configPath, "item", "read", id, "--field", "password")
 	if requests.Load() != before {
 		t.Fatal("config/idle recovery contacted server")
 	}

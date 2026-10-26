@@ -47,8 +47,8 @@ func TestListOutputEscapingGroupingAndJSON(t *testing.T) {
 	if err := writeList(&out, "item", "table", "", nil); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(out.String(), "\n") != 1 || !strings.HasPrefix(out.String(), "ID") {
-		t.Fatal("empty table must have only a header")
+	if !strings.Contains(out.String(), "No matching item") || !strings.Contains(out.String(), "--sync") {
+		t.Fatal("empty search did not explain how to refresh")
 	}
 }
 
