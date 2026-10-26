@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"strings"
 
@@ -33,7 +34,7 @@ func (c *Client) apiToken(ctx context.Context, apiKey APIKey) (tokens, error) {
 	}
 	form := url.Values{"grant_type": {"client_credentials"}, "scope": {"api"},
 		"client_id": {apiKey.ClientID}, "client_secret": {string(apiKey.ClientSecret)},
-		"deviceType": {"8"}, "deviceIdentifier": {c.deviceID}, "deviceName": {"bwb"}}
+		"deviceType": {cliDeviceType()}, "deviceIdentifier": {c.deviceID}, "deviceName": {"bwb"}}
 	body := []byte(form.Encode())
 	defer clear(body)
 	if err := c.request(ctx, "POST", c.identity+"/connect/token", body, true, "", &response); err != nil {
@@ -50,8 +51,14 @@ func (c *Client) apiToken(ctx context.Context, apiKey APIKey) (tokens, error) {
 		response.UserDecryptionOptions.HasMasterPassword != nil && !*response.UserDecryptionOptions.HasMasterPassword {
 		return tokens{}, errors.New("API key login requires a master password; Key Connector and passwordless accounts are unsupported")
 	}
-	if response.KDF == nil || *response.KDF != 0 || response.Key == "" {
-		return tokens{}, ErrUnsupported
+	if response.KDF == nil {
+		return tokens{}, fmt.Errorf("API key token response is missing Kdf: %w", ErrUnsupported)
+	}
+	if *response.KDF != 0 {
+		return tokens{}, fmt.Errorf("API key token response Kdf=%d (only PBKDF2 is supported): %w", *response.KDF, ErrUnsupported)
+	}
+	if response.Key == "" {
+		return tokens{}, fmt.Errorf("API key token response is missing the protected vault key: %w", ErrUnsupported)
 	}
 	if response.Iterations < 100000 || response.Iterations > 2000000 {
 		return tokens{}, errors.New("PBKDF2 iterations must be between 100000 and 2000000")
@@ -68,6 +75,22 @@ func (c *Client) LoginAPIKey(ctx context.Context, password []byte, apiKey APIKey
 	response, err := c.apiToken(ctx, apiKey)
 	if err != nil {
 		return nil, err
+	}
+	if c.email == "" {
+		var profile struct{ ID, Email string }
+		if err := c.request(ctx, "GET", c.api+"/accounts/profile", nil, false, response.Access, &profile); err != nil {
+			return nil, fmt.Errorf("resolve API key account: %w", err)
+		}
+		if "user."+profile.ID != apiKey.ClientID {
+			return nil, errors.New("API key account does not match server profile")
+		}
+		email, err := normalizeEmail(profile.Email)
+		if err != nil {
+			return nil, fmt.Errorf("API key account email: %w", err)
+		}
+		resolved := *c
+		resolved.email = email
+		c = &resolved
 	}
 	stretched, _, err := derive(c.email, password, response.Iterations)
 	if err != nil {

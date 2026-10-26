@@ -48,6 +48,8 @@ func TestConfigValidationAndSelection(t *testing.T) {
 		t.Fatal("legacy profile rejected", err)
 	}
 	for _, bad := range []string{
+		strings.Replace(sample, `email = "USER@example.com"`, `email = ""`, 1),
+		strings.Replace(sample, `email = "USER@example.com"`, `email = " "`, 1),
 		strings.Replace(sample, "version = 1", "version = 2", 1),
 		strings.Replace(sample, `"15m"`, `"-1s"`, 1),
 		strings.Replace(sample, `"15m"`, `"tomorrow"`, 1),

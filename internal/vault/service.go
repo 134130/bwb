@@ -177,6 +177,9 @@ func (s *Service) login(ctx context.Context, req LoginRequest, apiKey *bitwarden
 			req.Email = policy.Email
 		}
 	}
+	if apiKey != nil && req.Email == "" && saved.Cache != nil {
+		req.Email = saved.Cache.Email
+	}
 	client, err := bitwarden.NewClient(req.Server, req.Email, uuid.NewString())
 	if err != nil {
 		return Empty{}, err

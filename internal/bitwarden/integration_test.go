@@ -158,6 +158,7 @@ func TestSnapshotIntegration(t *testing.T) {
 		func(c *Cache) { c.KDF = 1 },
 		func(c *Cache) { c.Iterations = 2147483647 },
 		func(c *Cache) { c.Email = "other@example.invalid" },
+		func(c *Cache) { c.Email = "" },
 		func(c *Cache) { c.Snapshot.Profile.Email = "other@example.invalid" },
 		func(c *Cache) { c.Snapshot.Ciphers[0] = json.RawMessage(`{"id":"bad"}`) },
 	} {

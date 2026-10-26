@@ -58,10 +58,10 @@ SQLite와 keychain은 분산 트랜잭션이 아니므로 credential 참조와 �
 ### 개인 API Key 로그인
 
 ```sh
-bwb login --apikey --profile work --server SERVER_URL --email EMAIL
+bwb login --apikey --profile work --server SERVER_URL
 ```
 
-`client_id`, `client_secret`, 마스터 비밀번호를 숨김 입력으로 받는다. 설정에 server/email이 있으면 생략할 수 있다. 기존 login처럼 첫 sync와 unlock까지 성공해야 로그인을 저장한다. API Key는 서버 인증에 사용하고, 마스터 비밀번호는 로컬 복호화에만 사용한다. 개인 키(`user.<account UUID>`)만 지원하며 조직 API Key와 Secrets Manager 토큰은 받지 않는다.
+`client_id`, `client_secret`, 마스터 비밀번호를 숨김 입력으로 받는다. `--email`은 선택 사항이다. 최초 로그인에서 이메일을 생략하면 API Key 인증 후 서버 프로필에서 조회하고 계정 ID를 검증한다. config 또는 기존 로그인에 이메일이 있으면 그 값을 사용하며, 명시한 이메일도 실제 계정과 일치해야 한다. 설정에 server가 있으면 `--server`도 생략할 수 있다. 기존 login처럼 첫 sync와 unlock까지 성공해야 로그인을 저장한다. API Key는 서버 인증에 사용하고, 마스터 비밀번호는 로컬 복호화에만 사용한다. 개인 키(`user.<account UUID>`)만 지원하며 조직 API Key와 Secrets Manager 토큰은 받지 않는다.
 
 자동화에서는 `BWB_CLIENTID`와 `BWB_CLIENTSECRET`을 안전하게 환경변수로 공급하고 다음 명령을 실행한다. `--password-stdin`에는 마스터 비밀번호만 전달한다.
 
@@ -87,7 +87,7 @@ main.go → internal/cli (Cobra + 인증 실행부)
 
 키와 access/refresh token의 장기 보관은 `memguard` locked memory를 사용한다. 평문 snapshot은 보관하지 않는다. crypto·HTTP·JSON·RPC 처리 중 임시 Go 문자열/버퍼는 생기며 모든 복사본의 즉시 zeroize를 보장하지 않는다. 메모리 보호 실패 시 평문 fallback은 없다. 같은 OS 사용자 프로세스는 daemon 접근 가능하다. daemonkit SQLite에는 암호화 vault와 계정 metadata만 기록하며 비밀번호·token은 넣지 않는다. cache record는 512 KiB 단위로 원자적으로 저장하며 최대 64 MiB다. Unix 경로는 `XDG_STATE_HOME`, 실행·keychain namespace는 `BWB_INSTANCE`로 격리한다. 테스트는 둘 모두 독립 값으로 설정한다.
 
-지원 범위는 PBKDF2(100000–2000000 iterations), 개인·조직 vault, AES-CBC/HMAC `2.` 암호문, 8종의 기본 필드다. Argon2id, 2FA/SSO, reprompt, passkey는 아직 지원하지 않는다. 공식 Bitwarden 서버와의 상호운용성은 별도 검증이 필요하다.
+지원 범위는 PBKDF2(100000–2000000 iterations), 개인·조직 vault, AES-CBC/HMAC `2.` 암호문, 8종의 기본 필드다. 마스터 비밀번호 재확인(reprompt) 항목도 login/sync/offline unlock과 이름 목록은 지원한다. 해당 항목의 이름 외 필드 조회는 차단하며 Bitwarden 앱 사용을 안내한다. Argon2id, 2FA/SSO, 항목별 재확인 입력, passkey는 아직 지원하지 않는다. 공식 Bitwarden 서버와의 상호운용성은 별도 검증이 필요하다.
 
 ```sh
 go test ./...

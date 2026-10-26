@@ -33,7 +33,7 @@ func (s *Session) Describe(ctx context.Context, snapshot *Snapshot, id string) (
 		return nil, errors.New("invalid item")
 	}
 	if item.Reprompt != 0 {
-		return nil, ErrUnsupported
+		return nil, ErrReprompt
 	}
 	if item.ViewPassword != nil && !*item.ViewPassword {
 		return nil, ErrPermission

@@ -39,7 +39,7 @@ func TestDescribeDecryptsOnlyLabelsAndHonorsRestrictions(t *testing.T) {
 	item["viewPassword"] = true
 	item["reprompt"] = 1
 	update()
-	if _, err := session.Describe(context.Background(), snapshot, id); !errors.Is(err, ErrUnsupported) {
+	if _, err := session.Describe(context.Background(), snapshot, id); !errors.Is(err, ErrReprompt) {
 		t.Fatal(err)
 	}
 }

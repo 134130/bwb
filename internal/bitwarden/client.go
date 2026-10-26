@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/mail"
 	"net/url"
+	"runtime"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -22,12 +23,24 @@ var ErrKeyChanged = errors.New("vault key changed; login again")
 
 var ErrAuthentication = errors.New("login required or credentials rejected")
 
+func cliDeviceType() string {
+	switch runtime.GOOS {
+	case "windows":
+		return "23"
+	case "darwin":
+		return "24"
+	default:
+		return "25"
+	}
+}
+
 // Client talks to Password Manager endpoints, never the public organization API.
 type Client struct {
 	api, identity, email, deviceID, server string
 	http                                   *http.Client
 }
 
+// An empty email is resolved during API key login; password login still requires it.
 func NewClient(server, email, deviceID string) (*Client, error) {
 	u, err := url.Parse(server)
 	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" || u.ForceQuery {
@@ -40,10 +53,11 @@ func NewClient(server, email, deviceID string) (*Client, error) {
 	if u.Scheme != "https" && !(u.Scheme == "http" && local) {
 		return nil, errors.New("HTTPS required except for loopback servers")
 	}
-	email = strings.ToLower(strings.TrimSpace(email))
-	address, err := mail.ParseAddress(email)
-	if err != nil || address.Address != email {
-		return nil, errors.New("invalid email address")
+	if email != "" {
+		email, err = normalizeEmail(email)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if !validID(deviceID) {
 		return nil, errors.New("invalid device ID")
@@ -58,6 +72,15 @@ func NewClient(server, email, deviceID string) (*Client, error) {
 	}
 	return &Client{api: api, identity: identity, email: email, deviceID: deviceID, server: base,
 		http: &http.Client{Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
+}
+
+func normalizeEmail(email string) (string, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	address, err := mail.ParseAddress(email)
+	if err != nil || address.Address != email {
+		return "", errors.New("invalid email address")
+	}
+	return email, nil
 }
 
 type APIError struct{ Status int }
@@ -103,6 +126,9 @@ type tokens struct {
 }
 
 func (c *Client) Login(ctx context.Context, password []byte) (*Session, error) {
+	if c.email == "" {
+		return nil, errors.New("email is required for password login")
+	}
 	if len(password) == 0 || len(password) > 4096 {
 		return nil, errors.New("invalid password length")
 	}
@@ -126,7 +152,7 @@ func (c *Client) Login(ctx context.Context, password []byte) (*Session, error) {
 		return nil, err
 	}
 	form := url.Values{"grant_type": {"password"}, "client_id": {"web"}, "scope": {"api offline_access"},
-		"username": {c.email}, "password": {hash}, "deviceType": {"8"}, "deviceIdentifier": {c.deviceID}, "deviceName": {"bwb"}}
+		"username": {c.email}, "password": {hash}, "deviceType": {cliDeviceType()}, "deviceIdentifier": {c.deviceID}, "deviceName": {"bwb"}}
 	var response tokens
 	if err := c.request(ctx, "POST", c.identity+"/connect/token", []byte(form.Encode()), true, "", &response); err != nil {
 		var apiErr *APIError
@@ -144,7 +170,7 @@ func (c *Client) Login(ctx context.Context, password []byte) (*Session, error) {
 func (c *Client) openSession(stretched []byte, iterations int, response tokens) (*Session, error) {
 	key, err := decrypt(response.Key, stretched)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decrypt protected vault key: %w", err)
 	}
 	if len(key) != 64 {
 		clear(key)

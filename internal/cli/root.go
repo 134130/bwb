@@ -30,7 +30,7 @@ func NewRoot() *cobra.Command {
 	var apiKeyLogin bool
 	login := &cobra.Command{Use: "login", Short: "Log in and cache an encrypted snapshot", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if server != "" && email != "" {
+			if server != "" && (email != "" || apiKeyLogin) {
 				if _, err := bitwarden.NewClient(server, email, uuid.NewString()); err != nil {
 					return err
 				}
@@ -67,7 +67,7 @@ func NewRoot() *cobra.Command {
 			return err
 		}}
 	login.Flags().StringVar(&server, "server", "", "Vault URL (HTTPS, or loopback HTTP)")
-	login.Flags().StringVar(&email, "email", "", "Account email")
+	login.Flags().StringVar(&email, "email", "", "Account email (optional with --apikey)")
 	login.Flags().BoolVar(&passwordStdin, "password-stdin", false, "Read master password from stdin")
 	login.Flags().BoolVar(&apiKeyLogin, "apikey", false, "Authenticate with a personal API key, then unlock with the master password")
 	var unlockStdin bool

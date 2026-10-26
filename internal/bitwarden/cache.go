@@ -28,9 +28,9 @@ func (s *Session) Cache(snapshot *Snapshot) *Cache {
 		Iterations: s.iterations, Snapshot: snapshot.response}
 }
 
-// Unlock validates the entire cached vault without accessing the server or credential store.
+// Unlock validates cached identity and readable contents without accessing the server or credential store.
 func Unlock(ctx context.Context, cache *Cache, password []byte) (*Session, *Snapshot, error) {
-	if cache == nil || cache.Version != 1 || cache.KDF != 0 {
+	if cache == nil || cache.Version != 1 || cache.KDF != 0 || cache.Email == "" {
 		return nil, nil, ErrUnsupported
 	}
 	if len(password) == 0 || len(password) > 4096 {

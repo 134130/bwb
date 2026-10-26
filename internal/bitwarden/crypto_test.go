@@ -8,9 +8,12 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/awnumar/memguard"
 )
 
 // Golden values were generated independently by the Python snapshot builder.
@@ -82,13 +85,35 @@ func encryptPadded(t *testing.T, padded, key []byte) string {
 }
 
 func TestUnsupportedItemPolicies(t *testing.T) {
-	for _, raw := range []string{
-		`{"id":"20000000-0000-4000-8000-000000000001","type":9}`,
-		`{"id":"20000000-0000-4000-8000-000000000001","type":1,"reprompt":1}`,
+	key := bytes.Repeat([]byte{1}, 64)
+	session := &Session{key: memguard.NewBufferFromBytes(bytes.Clone(key))}
+	defer session.Close()
+	name := "PRIVATE-NAME"
+	padding := 16 - len(name)%16
+	encrypted := encryptPadded(t, append([]byte(name), bytes.Repeat([]byte{byte(padding)}, padding)...), key)
+	for _, tc := range []struct {
+		change func(map[string]any)
+		want   string
+	}{
+		{func(m map[string]any) { m["type"] = 9 }, "item type 9"},
+		{func(m map[string]any) { m["reprompt"] = 2 }, "reprompt type 2"},
+		{func(m map[string]any) { m["fields"] = []any{map[string]any{"type": 4}} }, "custom field type 4"},
+		{func(m map[string]any) {
+			m["login"] = map[string]any{"fido2Credentials": []any{map[string]any{"keyValue": "PRIVATE-KEY"}}}
+		}, "passkey credentials"},
 	} {
-		if _, err := decryptItem([]byte(raw), make([]byte, 64)); !errors.Is(err, ErrUnsupported) {
-			t.Fatal("unsupported item was not rejected", err)
-		}
+		t.Run(tc.want, func(t *testing.T) {
+			item := map[string]any{"id": "20000000-0000-4000-8000-000000000001", "type": 1, "name": encrypted, "login": map[string]any{}}
+			tc.change(item)
+			raw, _ := json.Marshal(item)
+			_, err := session.decryptSnapshot(t.Context(), syncResponse{Ciphers: []json.RawMessage{raw}})
+			if !errors.Is(err, ErrUnsupported) || !strings.Contains(err.Error(), "decrypt vault item 1: "+tc.want) {
+				t.Fatal("missing item diagnostic", err)
+			}
+			if strings.Contains(err.Error(), "PRIVATE") || strings.Contains(err.Error(), encrypted) {
+				t.Fatal("item diagnostic leaked vault contents")
+			}
+		})
 	}
 }
 

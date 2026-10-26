@@ -31,6 +31,10 @@ func apiService(t *testing.T) (*Service, *faultyCredentials, func() LoginAPIKeyR
 	if err := json.Unmarshal(data, &fixture); err != nil {
 		t.Fatal(err)
 	}
+	var snapshot struct{ Profile json.RawMessage }
+	if err := json.Unmarshal(fixture.Sync, &snapshot); err != nil {
+		t.Fatal(err)
+	}
 	var rejected atomic.Bool
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -48,6 +52,11 @@ func apiService(t *testing.T) (*Service, *faultyCredentials, func() LoginAPIKeyR
 			_, _ = w.Write(fixture.Token)
 		case "/api/sync":
 			_, _ = w.Write(fixture.Sync)
+		case "/api/accounts/profile":
+			if r.Header.Get("Authorization") != "Bearer test-access" {
+				t.Error("profile discovery was not authenticated")
+			}
+			_, _ = w.Write(snapshot.Profile)
 		default:
 			t.Error("unexpected endpoint", r.URL.Path)
 			w.WriteHeader(404)
@@ -57,7 +66,7 @@ func apiService(t *testing.T) (*Service, *faultyCredentials, func() LoginAPIKeyR
 	s, f := persistentService(t)
 	t.Cleanup(func() { _ = s.Shutdown(context.Background()) })
 	request := func() LoginAPIKeyRequest {
-		return LoginAPIKeyRequest{LoginRequest: LoginRequest{Profile: "default", Server: server.URL, Email: fixture.Email, Password: []byte(fixture.Password)},
+		return LoginAPIKeyRequest{LoginRequest: LoginRequest{Profile: "default", Server: server.URL, Password: []byte(fixture.Password)},
 			APIKey: bitwarden.APIKey{ClientID: fixture.ClientID, ClientSecret: []byte(fixture.ClientSecret)}}
 	}
 	return s, f, request, &rejected, &requests
@@ -77,6 +86,9 @@ func TestAPIKeyPersistenceRecoveryAndNoPasswordFallback(t *testing.T) {
 	if err != nil || saved.Version != 2 || saved.AuthMethod != "apikey" {
 		t.Fatal("API key metadata missing", err)
 	}
+	if saved.Cache.Email != "bwb-integration@example.invalid" {
+		t.Fatal("discovered email not persisted")
+	}
 	auth, err := s.loadCredential(ctx, saved)
 	if err != nil || auth.ClientID != request().ClientID || string(auth.ClientSecret) != string(request().ClientSecret) || len(auth.Token) != 0 {
 		t.Fatal("API credential not persisted", err)
@@ -90,7 +102,7 @@ func TestAPIKeyPersistenceRecoveryAndNoPasswordFallback(t *testing.T) {
 	}
 	oldCredential := saved.Credential
 	oldSession := s.profiles["default"].session
-	for _, kind := range []string{"bad key", "bad password", "wrong account", "keychain"} {
+	for _, kind := range []string{"bad key", "bad password", "wrong account", "wrong email", "keychain"} {
 		req := request()
 		switch kind {
 		case "bad key":
@@ -99,6 +111,8 @@ func TestAPIKeyPersistenceRecoveryAndNoPasswordFallback(t *testing.T) {
 			req.Password = []byte("wrong")
 		case "wrong account":
 			req.ClientID = "user.30000000-0000-4000-8000-000000000001"
+		case "wrong email":
+			req.Email = "other@example.invalid"
 		case "keychain":
 			f.setErr = secrets.ErrAccess
 		}
@@ -123,6 +137,25 @@ func TestAPIKeyPersistenceRecoveryAndNoPasswordFallback(t *testing.T) {
 	}
 	if requests.Load() != before {
 		t.Fatal("unlock contacted server")
+	}
+	const repromptID = "20000000-0000-4000-8000-000000000001"
+	list, err := restored.List(ctx, ListRequest{Profile: "default", Kind: "item"})
+	if err != nil || len(list.Entries) != 2 {
+		t.Fatal("reprompt item blocked cached list", err)
+	}
+	if value, err := restored.Read(ctx, ReadRequest{Profile: "default", ID: repromptID, Field: "name"}); err != nil || value.Value != "Reprompt item" {
+		t.Fatal("reprompt name unavailable", err)
+	}
+	for _, path := range []string{"login/password", "login/username", "notes", "fields/token"} {
+		if value, err := restored.Read(ctx, ReadRequest{Profile: "default", ID: repromptID, Field: path}); !errors.Is(err, bitwarden.ErrReprompt) || value.Value != "" {
+			t.Fatal("read bypassed reprompt", path, err)
+		}
+	}
+	if fields, err := restored.Describe(ctx, DescribeRequest{Profile: "default", ID: repromptID}); !errors.Is(err, bitwarden.ErrReprompt) || len(fields.Fields) != 0 {
+		t.Fatal("describe bypassed reprompt", err)
+	}
+	if value, err := restored.Read(ctx, ReadRequest{Profile: "default", ID: "20000000-0000-4000-8000-000000000002", Field: "login/password"}); err != nil || value.Value != "PUBLIC-TEST-PASSWORD" {
+		t.Fatal("reprompt item blocked other reads", err)
 	}
 	if _, err := restored.Sync(ctx, ProfileRequest{Profile: "default"}); !errors.Is(err, secrets.ErrAccess) {
 		t.Fatal("keychain error hidden", err)
@@ -159,8 +192,12 @@ func TestAPIKeyPersistenceRecoveryAndNoPasswordFallback(t *testing.T) {
 		t.Fatal("cached list checked server credentials")
 	}
 	rejected.Store(false)
+	before = requests.Load()
 	if _, err := restored.LoginAPIKey(ctx, request()); err != nil {
 		t.Fatal(err)
+	}
+	if requests.Load() != before+2 {
+		t.Fatal("relogin did not reuse saved email")
 	}
 	if _, err := restored.Logout(ctx, ProfileRequest{Profile: "default"}); err != nil {
 		t.Fatal(err)

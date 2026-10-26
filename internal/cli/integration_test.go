@@ -416,8 +416,7 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 		t.Fatal("logout did not survive restart")
 	}
 	// Personal API keys must survive restart without relying on refresh tokens or launcher environment.
-	apiLogin := append([]string{"--profile", "api"}, login...)
-	apiLogin = append(apiLogin, "--apikey")
+	apiLogin := []string{"--profile", "api", "login", "--server", endpoint.URL, "--apikey", "--password-stdin"}
 	must(manifest.Password+"\n", "", apiLogin...)
 	must("", "DEMO-only-password-1!", "--profile", "api", "read", id, "login/password")
 	apiBefore := apiKeyRequests.Load()
@@ -453,7 +452,7 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	terminal("no_prompt", "", "--profile", "api", "sync")
 	must("", "DEMO-only-password-1!", "--profile", "api", "read", id, "login/password")
 	rejectAPIKey.Store(false)
-	terminal("apikey", "", "--profile", "api", "login", "--apikey", "--server", endpoint.URL, "--email", manifest.Email)
+	terminal("apikey", "", "--profile", "api", "login", "--apikey", "--server", endpoint.URL)
 	must("", "", "--profile", "api", "logout")
 	must("", "logged_out\n", "--profile", "api", "status")
 	if _, err := run(manifest.Password+"\n", "--profile", "api", "unlock", "--password-stdin"); err == nil {

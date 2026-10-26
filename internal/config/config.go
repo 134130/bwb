@@ -33,6 +33,9 @@ type File struct {
 var profileName = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
 
 func Normalize(p Profile) (Profile, error) {
+	if strings.TrimSpace(p.Email) == "" {
+		return Profile{}, errors.New("profile email is required")
+	}
 	if _, err := bitwarden.NewClient(p.Server, p.Email, uuid.NewString()); err != nil {
 		return Profile{}, err
 	}

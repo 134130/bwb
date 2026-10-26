@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -13,6 +14,8 @@ import (
 )
 
 var ErrNotFound = errors.New("item or field not found")
+
+var ErrReprompt = errors.New("item requires master password reprompt; open it in the Bitwarden app")
 
 var payloadNames = map[int]string{1: "login", 2: "secureNote", 3: "card", 4: "identity", 5: "sshKey", 6: "bankAccount", 7: "driversLicense", 8: "passport"}
 
@@ -147,12 +150,12 @@ func (s *Session) validateSnapshot(ctx context.Context, response syncResponse) (
 func (s *Session) decryptSnapshot(ctx context.Context, response syncResponse) (*Vault, error) {
 	keys, err := s.organizationKeys(ctx, response.Profile)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decrypt organization keys: %w", err)
 	}
 	defer keys.close()
 	collections, err := decryptCollections(response.Collections, keys)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decrypt collections: %w", err)
 	}
 	vault := &Vault{Collections: collections, Profile: response.Profile, Folders: make([]Folder, 0, len(response.Folders)), Items: make([]Item, 0, len(response.Ciphers))}
 	folders := make(map[string]bool)
@@ -163,18 +166,18 @@ func (s *Session) decryptSnapshot(ctx context.Context, response syncResponse) (*
 		folders[folder.ID] = true
 		name, err := decryptText(folder.Name, s.key.Bytes())
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("decrypt folder name: %w", err)
 		}
 		vault.Folders = append(vault.Folders, Folder{ID: folder.ID, Name: name})
 	}
 	ids := make(map[string]bool)
-	for _, raw := range response.Ciphers {
+	for i, raw := range response.Ciphers {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		item, err := s.decryptOwnedItem(raw, keys)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("decrypt vault item %d: %w", i+1, err)
 		}
 		if err := validateCollections(item, collections); err != nil {
 			return nil, err
@@ -245,15 +248,15 @@ func decryptItem(raw []byte, userKey []byte) (Item, error) {
 	}
 	payload, supported := payloadNames[item.Type]
 	if !supported {
-		return Item{}, ErrUnsupported
+		return Item{}, fmt.Errorf("item type %d: %w", item.Type, ErrUnsupported)
 	}
 	// Reprompt requires a separate authorization flow.
 	var itemKey *string
 	if json.Unmarshal(envelope["key"], &itemKey) != nil && envelope["key"] != nil {
 		return Item{}, errors.New("invalid item key")
 	}
-	if item.Reprompt != 0 {
-		return Item{}, ErrUnsupported
+	if item.Reprompt != 0 && item.Reprompt != 1 {
+		return Item{}, fmt.Errorf("reprompt type %d: %w", item.Reprompt, ErrUnsupported)
 	}
 	key, err := decryptItemKey(itemKey, userKey)
 	if err != nil {
@@ -268,13 +271,18 @@ func decryptItem(raw []byte, userKey []byte) (Item, error) {
 	if err != nil {
 		return Item{}, err
 	}
+	if item.Reprompt == 1 {
+		// shortcut: expose only names until per-item master password verification is implemented.
+		item.Notes, item.Fields, item.Data = nil, nil, nil
+		return item, nil
+	}
 	if err := decryptOptional(&item.Notes, userKey); err != nil {
 		return Item{}, err
 	}
 	for i := range item.Fields {
 		field := &item.Fields[i]
 		if field.Type < 0 || field.Type > 3 {
-			return Item{}, ErrUnsupported
+			return Item{}, fmt.Errorf("custom field type %d: %w", field.Type, ErrUnsupported)
 		}
 		if err := decryptOptional(&field.Name, userKey); err != nil {
 			return Item{}, err
@@ -290,7 +298,7 @@ func decryptItem(raw []byte, userKey []byte) (Item, error) {
 		if credentials, exists := item.Data["fido2Credentials"]; exists && credentials != nil {
 			values, ok := credentials.([]any)
 			if !ok || len(values) != 0 {
-				return Item{}, ErrUnsupported
+				return Item{}, fmt.Errorf("passkey credentials: %w", ErrUnsupported)
 			}
 		}
 		if uris := item.Data["uris"]; uris != nil {
@@ -320,6 +328,9 @@ func (v *Vault) Read(id, path string) (string, error) {
 	for _, item := range v.Items {
 		if item.ID != id {
 			continue
+		}
+		if item.Reprompt != 0 && path != "name" {
+			return "", ErrReprompt
 		}
 		// shortcut: restricted items expose only their name until field-level policy parity is verified.
 		if item.ViewPassword != nil && !*item.ViewPassword && path != "name" {

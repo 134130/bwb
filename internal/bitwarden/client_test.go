@@ -7,11 +7,37 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
 const testDevice = "30000000-0000-4000-8000-000000000001"
+
+func TestPasswordLoginUsesCLIDeviceType(t *testing.T) {
+	want := map[string]string{"windows": "23", "darwin": "24", "linux": "25"}[runtime.GOOS]
+	var requested atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/identity/accounts/prelogin" {
+			io.WriteString(w, `{"kdf":0,"kdfIterations":100000}`)
+			return
+		}
+		requested.Store(true)
+		if err := r.ParseForm(); err != nil {
+			t.Error(err)
+		}
+		if r.Form.Get("deviceType") != want || r.Form.Get("deviceName") != "bwb" {
+			t.Error("password login did not identify as a CLI for this OS")
+		}
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer server.Close()
+	c, _ := NewClient(server.URL, "user@example.invalid", testDevice)
+	if _, err := c.Login(t.Context(), []byte("password")); !errors.Is(err, ErrAuthentication) || !requested.Load() {
+		t.Fatal("token request not exercised", err)
+	}
+}
 
 func TestServerBoundaries(t *testing.T) {
 	for _, server := range []string{"http://example.com", "https://user:pass@example.com", "https://example.com?a=b", "https://example.com#x", "file:///tmp/vault", "://"} {
@@ -73,6 +99,20 @@ func TestLoginRejectsKDFBeforeTokenRequest(t *testing.T) {
 		if err == nil || session != nil || requests != 1 {
 			t.Fatal("invalid KDF reached token request")
 		}
+	}
+}
+
+func TestPasswordLoginStillRequiresEmail(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("password login without email reached server")
+	}))
+	defer server.Close()
+	client, err := NewClient(server.URL, "", testDevice)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session, err := client.Login(t.Context(), []byte("password")); err == nil || session != nil {
+		t.Fatal("password login accepted missing email")
 	}
 }
 

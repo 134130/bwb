@@ -21,6 +21,43 @@
         "name": "2.IszQ0FzRzBWDAOejsSBi+A==|4+rcprEbEyf0LuWBA5DXbtFF4UO9mZLGtrAtp4rT8ds=|0ZLAe5TydqzQB4G67p2iOmAKKrU3BbDQwV8aO9xAME0="
       }
     ],
-    "ciphers": []
+    "ciphers": [
+      {
+        "id": "20000000-0000-4000-8000-000000000001",
+        "type": 1,
+        "reprompt": 1,
+        "name": "2.XAoQT+hVQJ7l/7So/YtunQ==|XGnCQPcSI+iqjvjg6eWhPw==|N2QKNp425pcPZhUpg1yP6gbwIUB3lLjdI8wfLZpFbG8=",
+        "notes": "2.aY8UngUuc0GQHE+3MoNtUg==|OySWzJI7a0AJp0cHROSg7OVquRG7h4psGjZdkyiUbv8=|H2x3/EH06/jT64yCDemdb3d0GfZD9jBFSuLvlVrdpbQ=",
+        "fields": [
+          {
+            "name": "2.Vc+S4CpuZSdZk16Ka68n5A==|IxgIOTnpxMwkRPXCvWhCFA==|rmQCSV+G2pTwsmHw0umy278Q2kvXA+e/saUVd6lLL6I=",
+            "value": "2.Wmzc9FsxyBDzmOtaIZWhIA==|qsTGzO/jYUzLtuFwOYBqpb4GP5iF6/49JRxXZTS9Cek=|D+8ngmFxZodWuyKHN436rePPVy4eMZSMJY+5Cf1Myrc=",
+            "type": 1
+          }
+        ],
+        "login": {
+          "username": "2.KmQe6t/5f3iy2KbM+IWhyg==|a6zsc/o9Xl/eEFzSY4O//A==|43WMgLDeXIJUyEWWPFtNxg0IwWETwSaT4ymJnanq3qQ=",
+          "password": "2.0u+ZQmzOPcrElUp70x4w+w==|1VAk2ydkMZLLMb2/dF/ZFJMnqtoyVtUu+v3VNjW8WXM=|PBKcM1jnReZ6IUtc9QrCjfks+0boaAlYk1d5ijguTVk="
+        }
+      },
+      {
+        "id": "20000000-0000-4000-8000-000000000002",
+        "type": 1,
+        "reprompt": 0,
+        "name": "2.V6AKca12WlCqb6MMn34BNA==|N5xz1uwPvNOdpcEx+LsW1g==|28fX1n9TS05bQsIzJMDaP5ni1HAww0X2VdMr0gAG+tI=",
+        "notes": "2.refTEXJO9Ffm4ELZFcG2Wg==|O+MGQpV8c7os/9h0DSoTqhR+ZlbEeNOq9JL8HDP0sDY=|AdE3X0Pvln1rmlX+q5zG0aNzRQK+sGZom0UHrzGKxJA=",
+        "fields": [
+          {
+            "name": "2.wQqlhDib4aFvqs4EbQT9Aw==|EpFsGS8Og3uZqn6n/psW5g==|AT1WHxy7y+oHD/8TXlrAFIoh3V2yKLr5KaWa2w3RBVI=",
+            "value": "2.NcmsteptP8Qqk6ArR0PBzQ==|62kg8154Wn82g7/dTXWMD3UboHKzQwo8YNCpIJcmHNk=|iv2pgdUC/7YE0kkwgbeSY04BIr+diDN4ldvVtEIOZaE=",
+            "type": 1
+          }
+        ],
+        "login": {
+          "username": "2.L8MmWm9uSpL8qFqZ17jUVw==|j1OaEPtaxJh8cmH97s6qvg==|Yh2z53kapBTvSEtOwccv9e0veOHlVfQRIAAGovqgiro=",
+          "password": "2.U20JBkgiSmDee4Zf9hFVzA==|MGQrW0wwP22miKA/1Ffq22QNJyQh43BvhMVtSLkvZ6c=|n6huzNXnUwgpk4mzpeg7knH9k2z4X2dBxrBDw7mBiJQ="
+        }
+      }
+    ]
   }
 }
