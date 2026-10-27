@@ -71,3 +71,59 @@ func (r *Root) copyOTP(write func(string) error) {
 		p.Message = "Copied"
 	}
 }
+
+// Each inline display owns its refresh result; hiding or replacing the item drops that owner.
+type inlineOTPMsg struct {
+	page *OTPPage
+	code vaultapi.TOTPResponse
+	err  error
+}
+
+func (r *Root) refreshInlineOTP() tea.Cmd {
+	d := &r.explorer.Detail
+	if !d.Revealed || d.Node == nil || d.Node.Item == nil {
+		return nil
+	}
+	hasOTP := false
+	for _, f := range d.Fields {
+		if f.Key == "totp" {
+			hasOTP = true
+		}
+	}
+	if !hasOTP {
+		return nil
+	}
+	if d.OTP == nil {
+		d.OTP = &OTPPage{ID: d.Node.Item.ID}
+	}
+	d.OTP.Now = time.Now()
+	if d.otpPending || d.OTP.Stopped || d.OTP.Now.Before(d.OTP.Code.ExpiresAt) {
+		return nil
+	}
+	d.otpPending = true
+	page, client, profile, lifetime := d.OTP, r.client, r.profile, r.ctx
+	id := page.ID
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(lifetime, 3*time.Second)
+		defer cancel()
+		code, err := client.Invoke(ctx, vaultapi.TOTP, vaultapi.TOTPRequest{Profile: profile, ID: id, Background: true})
+		return inlineOTPMsg{page, code, err}
+	}
+}
+func (r *Root) writeCopy(value string) {
+	if err := r.writeClipboard(value); err != nil {
+		r.message = "Clipboard unavailable"
+	} else {
+		r.message = "Copied"
+	}
+}
+func (r *Root) hideItem() {
+	if r.busy && r.workKind == "reveal" {
+		if r.cancel != nil {
+			r.cancel()
+		}
+		r.epoch++
+		r.busy = false
+	}
+	r.explorer.Detail.clearValue()
+}

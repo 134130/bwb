@@ -20,7 +20,7 @@ func TestReconnectFailureCanRetryWithoutRestoringSecrets(t *testing.T) {
 	r.explorer.Tree.Roots = sampleTree()
 	r.explorer.Tree.rebuild("gh", Size{60, 30})
 	r.explorer.Search.SetValue("gh")
-	r.explorer.Detail.Value = "secret"
+	r.explorer.Detail.Fields = testFields("secret")
 	oldEpoch := r.epoch
 	key := r.explorer.Tree.key()
 	r.Update(statusMsg{Epoch: oldEpoch, Err: errors.New("closed")})
@@ -28,7 +28,7 @@ func TestReconnectFailureCanRetryWithoutRestoringSecrets(t *testing.T) {
 	if r.explorer.Tree.savedKey != key {
 		t.Fatal("cancel discarded navigation")
 	}
-	if r.state.State != "disconnected" || r.explorer.Detail.Value != "" || r.explorer.Search.Value() != "" || len(r.explorer.Tree.Roots) != 0 {
+	if r.state.State != "disconnected" || secretValue(&r.explorer.Detail) != "" || r.explorer.Search.Value() != "" || len(r.explorer.Tree.Roots) != 0 {
 		t.Fatal("disconnect did not purge")
 	}
 	for range 2 {
@@ -45,8 +45,8 @@ func TestReconnectFailureCanRetryWithoutRestoringSecrets(t *testing.T) {
 			t.Fatal("failure not retryable", r.message)
 		}
 	}
-	r.Update(resultMsg{Epoch: oldEpoch, Kind: "read", Value: vaultapi.ReadResponse{Value: "late secret"}})
-	if calls != 2 || r.explorer.Detail.Value != "" {
+	r.Update(resultMsg{Epoch: oldEpoch, Kind: "reveal", Value: testItem("late secret")})
+	if calls != 2 || secretValue(&r.explorer.Detail) != "" {
 		t.Fatal("retry count or late response")
 	}
 }
@@ -71,15 +71,15 @@ func TestReconnectCancellationRejectsLateResult(t *testing.T) {
 func TestDisconnectTracksClientNotUIEpoch(t *testing.T) {
 	current, old := &kit.Client{}, &kit.Client{}
 	r := &Root{client: current, explorer: newExplorer(), epoch: 7, state: vaultapi.StatusResponse{State: "unlocked"}}
-	r.explorer.Detail.Value = "secret"
+	r.explorer.Detail.Fields = testFields("secret")
 	r.Update(disconnected{old, errors.New("closed")})
-	if r.explorer.Detail.Value != "secret" {
+	if secretValue(&r.explorer.Detail) != "secret" {
 		t.Fatal("old connection purged current state")
 	}
 	// Avoid Close on a synthetic client; nil is sufficient to exercise identity handling.
 	r.client = nil
 	r.Update(disconnected{nil, errors.New("closed")})
-	if r.state.State != "disconnected" || r.explorer.Detail.Value != "" {
+	if r.state.State != "disconnected" || secretValue(&r.explorer.Detail) != "" {
 		t.Fatal("disconnect did not purge")
 	}
 }

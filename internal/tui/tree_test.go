@@ -9,7 +9,6 @@ import (
 	"testing/synctest"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/134130/bwb/internal/bitwarden"
 	"github.com/134130/bwb/internal/vaultapi"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -117,10 +116,10 @@ func TestLockPurgesUIAndRejectsLateSecret(t *testing.T) {
 		root.explorer.Tree.Roots = sampleTree()
 		root.explorer.Tree.rebuild("gh", Size{40, 20})
 		root.explorer.Search.SetValue("gh")
-		root.explorer.Detail = Detail{Value: "secret", Revealed: true, Fields: []bitwarden.FieldInfo{{Path: "login/password"}}}
+		root.explorer.Detail = Detail{Revealed: true, Fields: testFields("secret")}
 		root.Update(statusMsg{Epoch: 7, Status: vaultapi.StatusResponse{State: "locked"}})
-		root.Update(resultMsg{Epoch: 7, Kind: "read", Value: vaultapi.ReadResponse{Value: "late-secret"}})
-		if root.explorer.Detail.Value != "" || len(root.explorer.Tree.Rows) != 0 || root.explorer.Search.Value() != "" || strings.Contains(root.View().Content, "secret") {
+		root.Update(resultMsg{Epoch: 7, Kind: "reveal", Value: testItem("late-secret")})
+		if secretValue(&root.explorer.Detail) != "" || len(root.explorer.Tree.Rows) != 0 || root.explorer.Search.Value() != "" || strings.Contains(root.View().Content, "secret") {
 			t.Fatal("locked UI retained plaintext")
 		}
 	})
@@ -166,14 +165,14 @@ var (
 	_ Component = (*ProfilesPage)(nil)
 )
 
-func TestLeavingDetailDiscardsPendingRead(t *testing.T) {
-	for _, key := range []tea.KeyPressMsg{{Code: tea.KeyTab}, {Code: '?', Text: "?"}} {
+func TestSearchAndHelpDiscardPendingReveal(t *testing.T) {
+	for _, key := range []tea.KeyPressMsg{{Code: '/', Text: "/"}, {Code: '?', Text: "?"}} {
 		ctx, cancel := context.WithCancel(t.Context())
-		r := &Root{ctx: ctx, profile: "default", page: "explorer", state: vaultapi.StatusResponse{State: "unlocked"}, size: Size{100, 24}, explorer: newExplorer(), epoch: 3, busy: true, workKind: "read", cancel: cancel}
+		r := &Root{ctx: ctx, profile: "default", page: "explorer", state: vaultapi.StatusResponse{State: "unlocked"}, size: Size{100, 24}, explorer: newExplorer(), epoch: 3, busy: true, workKind: "reveal", cancel: cancel}
 		r.explorer.Focus = "detail"
 		r.Update(key)
-		r.Update(resultMsg{Epoch: 3, Kind: "read", Value: vaultapi.ReadResponse{Value: "secret"}})
-		if r.explorer.Detail.Value != "" || r.epoch == 3 {
+		r.Update(resultMsg{Epoch: 3, Kind: "reveal", Value: testItem("secret")})
+		if secretValue(&r.explorer.Detail) != "" || r.epoch == 3 {
 			t.Fatal("stale reveal survived focus change")
 		}
 		cancel()
@@ -197,17 +196,17 @@ func TestSyncPreservesNavigationAndRejectsLateSecrets(t *testing.T) {
 	tree.filteredCollapsed["unused"] = true
 	key, saved := tree.key(), tree.savedKey
 	r.explorer.Search.SetValue("Git")
-	r.explorer.Detail.Value = "secret"
+	r.explorer.Detail.Fields = testFields("secret")
 	r.explorer.Detail.Revealed = true
 	oldEpoch := r.epoch
 	r.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	defer r.cancel()
-	if !r.busy || r.workKind != "sync" || r.explorer.Detail.Value != "" {
+	if !r.busy || r.workKind != "sync" || secretValue(&r.explorer.Detail) != "" {
 		t.Fatal("sync did not start or clear secret")
 	}
-	r.Update(resultMsg{Epoch: oldEpoch, Kind: "read", Value: vaultapi.ReadResponse{Value: "late"}})
+	r.Update(resultMsg{Epoch: oldEpoch, Kind: "reveal", Value: testItem("late")})
 	r.Update(tea.KeyPressMsg{Code: tea.KeyDown})
-	if tree.key() != key || r.explorer.Detail.Value != "" {
+	if tree.key() != key || secretValue(&r.explorer.Detail) != "" {
 		t.Fatal("pending sync allowed navigation or late secret")
 	}
 	catalog["item"][0].Name = "GitHub updated"
@@ -218,8 +217,8 @@ func TestSyncPreservesNavigationAndRejectsLateSecrets(t *testing.T) {
 	if tree.key() != key || tree.Query != "Git" || tree.savedKey != saved || !tree.Reverse || !tree.collapsed["unused"] || !tree.filteredCollapsed["unused"] || r.explorer.Search.Value() != "Git" {
 		t.Fatal("sync lost navigation")
 	}
-	r.Update(resultMsg{Epoch: oldEpoch, Kind: "read", Value: vaultapi.ReadResponse{Value: "late"}})
-	if r.explorer.Detail.Value != "" {
+	r.Update(resultMsg{Epoch: oldEpoch, Kind: "reveal", Value: testItem("late")})
+	if secretValue(&r.explorer.Detail) != "" {
 		t.Fatal("late secret restored")
 	}
 }

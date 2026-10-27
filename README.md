@@ -173,15 +173,17 @@ bwb --profile personal tui
 
 - `↑↓`/`j,k`: 이동. `←→`/`h,l`: 접기·펼치기. `s`: 디렉터리 우선 이름 정렬 방향 전환.
 - `/`: 검색 입력. `Enter` 또는 `Esc`: 검색어를 유지하고 tree로 복귀. Tree에서 `Esc`: 검색 해제 및 원래 위치 복원.
-- `Tab`: tree/상세 pane. 좁은 화면에서는 상세가 별도 화면으로 전환된다.
-- 항목에서 `Enter`: 상세로 이동. 필드에서 `Enter`: 값 표시/숨김. `PgUp/PgDown`: 긴 값 스크롤.
+- `Tab`/`Shift+Tab`: tree/상세 pane. 좁은 화면에서는 포커스 pane만 표시한다.
+- 항목에서 `Enter`: 상세로 이동. `v`: item 전체 reveal/hide. 필드에서 `Enter`: 긴 값 펼치기(숨김 상태는 유지). `y`: 선택 필드 즉시 복사. `Esc`/`q`: 펼친 값 닫기. `PgUp/PgDown`: 스크롤.
 - `r`: Explorer 수동 sync. 성공 시 검색·선택·펼침·정렬을 유지해 갱신한다. 실패 시 기존 목록을 유지하며 표시 중인 비밀은 즉시 숨긴다. 진행 중 잠금·종료는 가능하다.
-- `Ctrl+P`: Profiles. `Enter`/`u`: profile 선택·인증. `l`: 선택 profile 잠금. `x`: 확인 후 logout. `r`: daemon이 선택한 TOML 전체 reload.
+- `Ctrl+P`: Profiles. `Tab`: 목록/설정 pane 전환, 설정 pane에서 `↑↓`/`PgUp/PgDown` 스크롤. `Enter`/`u`: profile 선택·인증. `l`: 선택 profile 잠금. `x`: 확인 후 logout. `r`: daemon이 선택한 TOML 전체 reload.
 - `Ctrl+L`: 현재 profile 잠금. `?`: 도움말. `q`: 종료(daemon은 기존 timeout 정책 유지). 비밀번호 창은 `Esc`로 취소한다.
 
-항목 선택은 필드 이름만 가져오고 모든 값은 기본 마스킹한다. 비밀은 필드를 명시적으로 열 때만 Read RPC로 가져온다. 항목·필드 이동, 상세 pane 이탈, profile 전환 시 표시값을 제거한다. 500ms 상태 조회로 잠금을 감지하면 tree·검색어·상세·비밀을 화면과 UI 상태에서 제거하고 다시 인증한 뒤 opaque ID로 위치를 복원한다. 연결 오류는 데이터 제거 후 Enter로 재연결한다. 중단된 daemon은 기존 CLI config 경로로 다시 시작하며, 필요 시 인증 후 목록을 다시 읽는다. 실패하면 오류를 표시하고 Enter로 재시도할 수 있다. 연결 대기는 Esc로 취소하며 이전 작업은 재실행하지 않는다. 이미 표시된 터미널 내용과 Go 문자열의 물리적 소거는 보장하지 않는다.
+Search·Explorer·Item은 같은 두께의 테두리를 사용하며 비활성 패널의 테두리만 dim 처리한다. 터미널 background 응답으로 dark/light 색상을 선택하고, 응답이 없으면 dark를 사용한다. 선택 행과 포커스는 별도로 표시하며 상태 메시지가 단축키 안내를 덮지 않는다.
 
-검색·탐색 같은 실제 사용자 조작은 최대 초당 한 번 Activity RPC로 idle 시간을 갱신한다. 백그라운드 목록·필드 이름 조회와 상태 polling은 시간을 연장하지 않는다. 비밀 필드 조회는 CLI와 같은 기존 활동 정책을 따른다. CLI에서는 상세에 표시된 `url/1` 같은 키로 URL을 읽는다.
+항목 선택은 Item RPC로 일반 값을 표시하고 민감한 값은 마스킹한다. `v`로 전체 민감 값을 가져오며, 필드 이동·pane 전환은 reveal을 유지한다. item 변경·검색 시작·도움말·profile 전환·sync는 민감 값을 제거한다. 기존 reprompt·권한 제한은 우회하지 않고 표시한다. 500ms 상태 조회로 잠금을 감지하면 tree·검색어·상세·비밀을 화면과 UI 상태에서 제거하고 다시 인증한 뒤 opaque ID로 위치를 복원한다. 연결 오류는 데이터 제거 후 Enter로 재연결한다. 중단된 daemon은 기존 CLI config 경로로 다시 시작하며, 필요 시 인증 후 목록을 다시 읽는다. 실패하면 오류를 표시하고 Enter로 재시도할 수 있다. 연결 대기는 Esc로 취소하며 이전 작업은 재실행하지 않는다. 이미 표시된 터미널 내용과 Go 문자열의 물리적 소거는 보장하지 않는다.
+
+검색·탐색 같은 실제 사용자 조작은 최대 초당 한 번 Activity RPC로 idle 시간을 갱신한다. 백그라운드 목록·상태 polling·TOTP 갱신은 시간을 연장하지 않는다. 항목 상세·reveal·복사는 CLI와 같은 조회 활동 정책을 따른다. CLI에서는 상세에 표시된 `url/1` 같은 키로 URL을 읽는다.
 
 Profiles는 TOML에 정의된 profile과 SQLite에 저장된 로그인 profile을 함께 보여준다. 파일 값과 적용값을 비교하고 파일 오류를 표시하며, 파일 오류 중에도 잠금·logout이 가능하다. 편집·자동 sync는 아직 제공하지 않는다.
 
@@ -192,9 +194,9 @@ Profiles는 TOML에 정의된 profile과 SQLite에 저장된 로그인 profile�
 
 파이프·리다이렉션 또는 `--non-interactive`에서는 현재 코드 한 개만 stdout에 출력한다. 최소 유효시간 대기는 없으므로 만료 직전 코드가 나올 수 있다.
 
-TUI 상세의 `Authentication code`를 Enter로 열면 같은 화면을 사용하며 `q`로 상세에 돌아온다. `TOTP setup key`는 시드 원문을 명시적으로 여는 별도 필드다. 기존 `item read ITEM --field totp-secret`도 시드 원문 조회를 유지한다.
+TUI에서 item을 `v`로 reveal하면 `Authentication code` 행에 코드와 남은 시간이 표시되고 자동 갱신한다. 숨긴 상태에서도 해당 행의 `y`로 현재 코드를 바로 복사한다. `TOTP seed`는 item 전체 reveal에 포함되는 시드 필드다. 기존 `item read ITEM --field totp-secret`도 시드 원문 조회를 유지한다.
 
-코드 생성은 daemon에서 수행한다. 화면에는 코드·만료시각만 전달하며 자동 갱신은 idle 시간을 연장하지 않는다. 잠금·연결 종료 시 코드를 제거한다. OS 클립보드에 복사한 값은 자동 갱신·삭제하지 않는다. macOS는 pbcopy, Linux는 설치된 클립보드 도구와 그래픽 세션이 필요하며 지원되지 않으면 오류를 표시한다.
+코드 생성은 daemon에서 수행한다. TOTP 갱신 RPC는 코드·만료시각만 전달하며 idle 시간을 연장하지 않는다. 잠금·연결 종료 시 코드를 제거한다. OS 클립보드에 복사한 값은 자동 갱신·삭제하지 않는다. macOS는 pbcopy, Linux는 설치된 클립보드 도구와 그래픽 세션이 필요하며 지원되지 않으면 오류를 표시한다.
 
 Base32 시드 및 표준 `otpauth://totp` URI, SHA1/SHA256/SHA512, 6·8자리와 1–86400초 주기를 지원한다. HOTP·Steam 형식은 명시적 오류다. 생성 시각은 daemon의 시스템 시계를 따른다.
 
@@ -214,4 +216,4 @@ bwb: daemon v0.3.0 is older than CLI v0.4.0. Run: bwb daemon update
 자동 교체는 실행 중 daemon의 config 경로를 유지하고 파일을 먼저 검증한다. 모든 profile의 메모리 세션과 진행 작업은 재시작으로 종료된다. 현재 대화형 명령은 필요한 인증을 거쳐 계속하며 다른 TUI는 기존 재연결 흐름을 따른다. daemonkit의 실행 토큰으로 버전 확인 이후의 재시작·수동 업데이트 충돌을 감지한다. 충돌 시 버전과 config 검증부터 다시 판단하며, 세 번 충돌하면 오류를 반환한다. 명시적 `daemon update`는 버전과 무관한 수동 교체 동작을 유지한다. 교체 실패는 오류로 반환하며 daemonkit의 바이너리·프로세스 롤백을 사용한다. 데이터 마이그레이션 롤백은 포함하지 않는다. 재시작은 disk config를 다시 읽으며 마지막 적용 값을 복원하지 않는다. 기본 config의 선택적 로드 의미도 유지한다. 구버전 daemon이 선택적 여부를 제공하지 않고 파일도 없으면 안전하게 자동 교체를 중단한다.
 
 
-일반 필드는 TUI 상세에서 `y`로 화면에 드러내지 않고 복사한다. CLI는 `bwb item read ITEM --field password --copy`를 사용한다. 성공 메시지 `Copied`는 stderr에만 출력하며 stdout은 비운다. `--copy`는 단일 `--field`가 필요하며 `--reveal`·JSON 출력과 함께 사용할 수 없다. 클립보드 실패 시 평문 출력으로 대체하지 않는다. TUI에서 필드·pane 이동, 잠금, 도움말 전환 등으로 취소된 조회 결과는 복사하지 않는다. 복사한 값은 기존 TOTP와 마찬가지로 자동 삭제하지 않는다.
+필드는 TUI 상세에서 `y`로 reveal 없이 복사할 수 있다. CLI는 `bwb item read ITEM --field password --copy`를 사용한다. 성공 메시지 `Copied`는 stderr에만 출력하며 stdout은 비운다. `--copy`는 단일 `--field`가 필요하며 `--reveal`·JSON 출력과 함께 사용할 수 없다. 클립보드 실패 시 평문 출력으로 대체하지 않는다. TUI에서 필드·pane 이동, 잠금, 도움말 전환 등으로 취소된 복사 요청의 결과는 클립보드에 쓰지 않는다. 복사한 값은 기존 TOTP와 마찬가지로 자동 삭제하지 않는다.

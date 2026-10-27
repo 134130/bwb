@@ -329,6 +329,24 @@ def compare(expected, actual, path):
         require(expected == actual, f'{path}: value mismatch')
 
 
+def snapshot_manifest():
+    manifest = json.loads((SNAPSHOT / 'manifest.json').read_text())
+    require(manifest['version'] == 1 and manifest['image'] == IMAGE, 'snapshot version/image mismatch')
+    require(manifest['dump_sha256'] == digest(SNAPSHOT / 'vaultwarden.sql'), 'dump checksum mismatch')
+    require(manifest['fixture_sha256'] == digest(ROOT / 'testdata/bitwarden.json'),
+            'fixture changed: rebuild and review snapshot')
+    require(manifest['organizations_sha256'] == digest(ROOT / 'testdata/organizations.json'), 'organization fixture changed: rebuild snapshot')
+    return manifest
+
+
+def restore_snapshot(db_path):
+    manifest = snapshot_manifest()
+    with sqlite3.connect(db_path) as db:
+        db.executescript((SNAPSHOT / 'vaultwarden.sql').read_text())
+        require(db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok', 'corrupt snapshot')
+    return manifest
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--rebuild', action='store_true', help='replace the committed synthetic SQL snapshot')
@@ -349,15 +367,7 @@ def main():
             (SNAPSHOT / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
             print('Snapshot rebuilt. Run again without --rebuild to verify restoration.')
         else:
-            manifest = json.loads((SNAPSHOT / 'manifest.json').read_text())
-            require(manifest['version'] == 1 and manifest['image'] == IMAGE, 'snapshot version/image mismatch')
-            require(manifest['dump_sha256'] == digest(SNAPSHOT / 'vaultwarden.sql'), 'dump checksum mismatch')
-            require(manifest['fixture_sha256'] == digest(ROOT / 'testdata/bitwarden.json'),
-                    'fixture changed: rebuild and review snapshot')
-            require(manifest['organizations_sha256'] == digest(ROOT / 'testdata/organizations.json'), 'organization fixture changed: rebuild snapshot')
-            with sqlite3.connect(db_path) as db:
-                db.executescript((SNAPSHOT / 'vaultwarden.sql').read_text())
-                require(db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok', 'corrupt snapshot')
+            manifest = restore_snapshot(db_path)
             with Server(directory) as server:
                 verify(server, manifest)
                 auth = server.login()

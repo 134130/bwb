@@ -1,0 +1,9 @@
+#!/bin/sh
+#MISE description="Log out and remove the isolated development vault"
+set -eu
+cd "$MISE_PROJECT_ROOT"
+if [ ! -f .dev/demo/environment.json ]; then
+    echo 'No development environment to remove.'
+    exit 0
+fi
+exec .dev/venv/bin/python dev/integration/demo.py down

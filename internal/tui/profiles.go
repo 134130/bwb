@@ -16,6 +16,9 @@ type profileRow struct {
 	File   *config.Profile
 }
 type ProfilesPage struct {
+	Light           bool
+	DetailFocus     bool
+	Scroll          int
 	Rows            []profileRow
 	Index, Offset   int
 	Path, FileError string
@@ -24,15 +27,44 @@ type ProfilesPage struct {
 func (p *ProfilesPage) Update(msg tea.Msg, size Size) tea.Cmd {
 	if key, ok := msg.(tea.KeyPressMsg); ok {
 		switch key.String() {
+		case "tab", "shift+tab":
+			p.DetailFocus = !p.DetailFocus
+		case "esc":
+			p.DetailFocus = false
 		case "up", "k":
-			p.Index = max(0, p.Index-1)
+			if p.DetailFocus {
+				p.Scroll = max(0, p.Scroll-1)
+			} else {
+				p.Index = max(0, p.Index-1)
+				p.Scroll = 0
+			}
 		case "down", "j":
-			p.Index = min(max(0, len(p.Rows)-1), p.Index+1)
+			if p.DetailFocus {
+				p.Scroll++
+			} else {
+				p.Index = min(max(0, len(p.Rows)-1), p.Index+1)
+				p.Scroll = 0
+			}
+		case "pgdown":
+			if p.DetailFocus {
+				p.Scroll += max(1, size.Height/2)
+			}
+		case "pgup":
+			if p.DetailFocus {
+				p.Scroll = max(0, p.Scroll-max(1, size.Height/2))
+			}
 		}
 	}
-	p.Offset = clampOffset(p.Index, p.Offset, size.Height)
+	left, right := p.layout(size)
+	if left.Width > 0 {
+		p.Offset = clampOffset(p.Index, p.Offset, inside(left).Height)
+	}
+	if right.Width > 0 {
+		p.Scroll = min(p.Scroll, max(0, len(p.detailLines(inside(right)))-inside(right).Height))
+	}
 	return nil
 }
+
 func (p *ProfilesPage) current() *profileRow {
 	if len(p.Rows) == 0 {
 		return nil
@@ -40,16 +72,41 @@ func (p *ProfilesPage) current() *profileRow {
 	return &p.Rows[min(p.Index, len(p.Rows)-1)]
 }
 func (p *ProfilesPage) View(size Size) string {
-	left := min(28, max(0, size.Width/3))
+	left, right := p.layout(size)
+	listSize := inside(left)
 	lines := []string{}
-	for i := p.Offset; i < min(len(p.Rows), p.Offset+max(0, size.Height)); i++ {
+	for i := p.Offset; i < min(len(p.Rows), p.Offset+max(0, listSize.Height)); i++ {
 		row := p.Rows[i]
 		line := safe(row.Name) + "  " + row.Status.State
 		if i == p.Index {
-			line = selected.Render("> " + line)
+			line = selection("> "+line, listSize.Width, p.Light)
 		}
 		lines = append(lines, line)
 	}
+
+	list := panel("Profiles", strings.Join(lines, "\n"), left, !p.DetailFocus, p.Light)
+	detail := p.detailLines(inside(right))
+	settings := panel("Applied configuration", strings.Join(detail[min(p.Scroll, len(detail)):], "\n"), right, p.DetailFocus, p.Light)
+	if left.Width == 0 {
+		return settings
+	}
+	if right.Width == 0 {
+		return list
+	}
+	return box(lipgloss.JoinHorizontal(lipgloss.Top, list, " ", settings), size)
+}
+func (p *ProfilesPage) layout(size Size) (Size, Size) {
+	if size.Width < 85 {
+		if p.DetailFocus {
+			return Size{}, size
+		}
+		return size, Size{}
+	}
+	left := min(32, max(0, size.Width/3))
+	return Size{left, size.Height}, Size{max(0, size.Width-left-1), size.Height}
+}
+
+func (p *ProfilesPage) detailLines(size Size) []string {
 	detail := "No profiles"
 	if row := p.current(); row != nil {
 		d := row.Status
@@ -65,5 +122,5 @@ func (p *ProfilesPage) View(size Size) string {
 		}
 		detail += "\n\nEnter use · u login/unlock\nl lock · x logout · r reload whole file"
 	}
-	return box(lipgloss.JoinHorizontal(lipgloss.Top, box(strings.Join(lines, "\n"), Size{left, size.Height}), box(detail, Size{max(0, size.Width-left-1), size.Height})), size)
+	return strings.Split(lipgloss.Wrap(detail, max(1, size.Width), ""), "\n")
 }

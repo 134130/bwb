@@ -9,6 +9,7 @@ import (
 	"unicode"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/134130/bwb/internal/vaultapi"
 )
 
@@ -23,6 +24,7 @@ type Row struct {
 	Depth int
 }
 type Tree struct {
+	Light                        bool
 	Roots                        []*Node
 	Rows                         []Row
 	Index, Offset                int
@@ -265,12 +267,12 @@ func (t *Tree) View(size Size) string {
 				icon = "▸ "
 			}
 		}
-		label := strings.Repeat("  ", row.Depth) + icon + highlight(t.Query, row.Node.Name)
+		label := strings.Repeat("  ", row.Depth) + icon + highlight(t.Query, row.Node.Name, t.Light)
 		if row.Node.Item != nil {
-			label += "  " + muted.Render(safe(row.Node.Item.Type))
+			label += "  " + subdued(safe(row.Node.Item.Type), t.Light)
 		}
 		if i == t.Index {
-			label = selected.Render("> " + label)
+			label = selection("> "+label, size.Width, t.Light)
 		} else {
 			label = "  " + label
 		}
@@ -279,7 +281,7 @@ func (t *Tree) View(size Size) string {
 	return box(strings.Join(lines, "\n"), size)
 }
 
-func highlight(query, value string) string {
+func highlight(query, value string, light bool) string {
 	value = safe(value)
 	if query == "" || !fuzzy(query, value) {
 		return value
@@ -289,7 +291,7 @@ func highlight(query, value string) string {
 	var out strings.Builder
 	for _, r := range value {
 		if pos < len(q) && unicode.ToLower(r) == q[pos] {
-			out.WriteString(selected.Underline(true).Render(string(r)))
+			out.WriteString(lipgloss.NewStyle().Underline(true).Render(string(r)))
 			pos++
 		} else {
 			out.WriteRune(r)

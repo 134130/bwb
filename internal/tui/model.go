@@ -6,11 +6,9 @@ import (
 	"fmt"
 	"io"
 	"slices"
-	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/134130/bwb/internal/bitwarden"
 	"github.com/134130/bwb/internal/config"
 	"github.com/134130/bwb/internal/vaultapi"
 	"github.com/134130/bwb/internal/vaultclient"
@@ -43,6 +41,7 @@ type authDialog struct {
 
 // Root alone stores terminal size. Every child receives content constraints.
 type Root struct {
+	light          bool
 	writeClipboard func(string) error
 	connect        func(context.Context) (*kit.Client, error)
 	otp            *OTPPage
@@ -101,8 +100,10 @@ func run(ctx context.Context, profile, id string, client *kit.Client, connect fu
 func tick() tea.Cmd {
 	return tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg { return tickMsg(t) })
 }
-func (r *Root) Init() tea.Cmd     { return tea.Batch(r.load(), tick(), r.watchConnection()) }
-func (r *Root) contentSize() Size { return Size{max(0, r.size.Width), max(0, r.size.Height-3)} }
+func (r *Root) Init() tea.Cmd {
+	return tea.Batch(r.load(), tick(), r.watchConnection(), tea.RequestBackgroundColor)
+}
+func (r *Root) contentSize() Size { return Size{max(0, r.size.Width), max(0, r.size.Height-4)} }
 func (r *Root) operation(kind string, call func(context.Context) (any, error)) tea.Cmd {
 	if r.cancel != nil {
 		r.cancel()
@@ -222,20 +223,26 @@ func (r *Root) purge() {
 		key, offset = r.explorer.Tree.savedKey, r.explorer.Tree.savedOffset
 	}
 	r.explorer = newExplorer()
+	r.explorer.Light = r.light
 	r.explorer.Tree.savedKey = key
 	r.explorer.Tree.savedOffset = offset
 	r.explorer.Tree.collapsed = collapsed
-	r.profiles = ProfilesPage{}
+	r.profiles = ProfilesPage{Light: r.light}
 }
 func (r *Root) describe() tea.Cmd {
 	n := r.explorer.Tree.current()
-	r.explorer.Detail = Detail{Node: n}
+	r.explorer.Detail = Detail{Node: n, Light: r.light}
 	if n == nil || n.Item == nil {
+		if r.cancel != nil {
+			r.cancel()
+		}
+		r.epoch++
+		r.busy = false
 		return nil
 	}
 	profile, id, executor := r.profile, n.Item.ID, r.executor
 	return r.operation("describe", func(ctx context.Context) (any, error) {
-		return executor.Describe(ctx, vaultapi.DescribeRequest{Profile: profile, ID: id})
+		return executor.Item(ctx, vaultapi.ItemRequest{Profile: profile, Item: id})
 	})
 }
 func (r *Root) lock(profile string) tea.Cmd {
@@ -263,13 +270,34 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	client, executor := r.client, r.executor
 	size := r.contentSize()
 	switch m := msg.(type) {
+	case tea.BackgroundColorMsg:
+		r.light = !m.IsDark()
+		r.explorer.Light, r.profiles.Light = r.light, r.light
+		r.explorer.Update(LayoutMsg{}, size)
+		if r.auth != nil {
+			r.auth.Input.setTheme(r.light)
+		}
+		return r, nil
 	case tea.WindowSizeMsg:
 		r.size = Size{max(0, m.Width), max(0, m.Height)}
 		size = r.contentSize()
 		r.explorer.Update(LayoutMsg{}, size)
 		r.profiles.Update(LayoutMsg{}, size)
 		if r.auth != nil {
-			r.auth.Input.Update(LayoutMsg{}, Size{size.Width, 1})
+			r.auth.Input.Update(LayoutMsg{}, Size{max(0, min(72, size.Width)-4), 1})
+		}
+		return r, nil
+	case inlineOTPMsg:
+		d := &r.explorer.Detail
+		if d.OTP != m.page || !d.Revealed {
+			return r, nil
+		}
+		d.otpPending = false
+		d.OTP.Now = time.Now()
+		d.OTP.Code = m.code
+		if m.err != nil {
+			d.OTP.Stopped = true
+			d.OTP.Code = vaultapi.TOTPResponse{}
 		}
 		return r, nil
 	case tickMsg:
@@ -283,7 +311,7 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return r, tea.Batch(tick(), cmd, r.poll())
 			}
 		}
-		return r, tea.Batch(tick(), r.poll())
+		return r, tea.Batch(tick(), r.poll(), r.refreshInlineOTP())
 	case disconnected:
 		if m.client != r.client || r.state.State == "disconnected" {
 			return r, nil
@@ -323,8 +351,10 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return r, nil
 		}
+		r.explorer.Detail.clearValue()
 		input := newInput(true)
-		input.Update(LayoutMsg{}, Size{size.Width, 1})
+		input.setTheme(r.light)
+		input.Update(LayoutMsg{}, Size{max(0, min(72, size.Width)-4), 1})
 		r.auth = &authDialog{Prompt: m, Input: input}
 		return r, tea.Batch(r.auth.Input.Focus(), func() tea.Msg { <-m.Context.Done(); return promptEnded{m.Reply} })
 	case promptEnded:
@@ -361,7 +391,7 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				r.otp.Message = r.message
 				r.otp.Stopped = true
 			}
-			if m.Kind == "describe" {
+			if m.Kind == "describe" || m.Kind == "reveal" {
 				r.explorer.Detail.Error = r.message
 			}
 			return r, nil
@@ -394,7 +424,7 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			restore := len(t.Rows) == 0 && t.Query == ""
 			t.Roots = buildTree(m.Value.(map[string][]vaultapi.ListEntry))
 			left, _ := r.explorer.layout(size)
-			t.rebuild(t.Query, left)
+			t.rebuild(t.Query, inside(left))
 			if restore && t.savedKey != "" {
 				for i, row := range t.Rows {
 					if row.Node.Key == t.savedKey {
@@ -403,31 +433,20 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						break
 					}
 				}
-				t.Update(LayoutMsg{}, left)
+				t.Update(LayoutMsg{}, inside(left))
 			}
 			return r, r.describe()
-		case "describe":
-			r.explorer.Detail.Fields = nil
-			for _, f := range m.Value.(vaultapi.DescribeResponse).Fields {
-				if f.Path == "login/totp" {
-					r.explorer.Detail.Fields = append(r.explorer.Detail.Fields, bitwarden.FieldInfo{Path: "totp", Label: "Authentication code"})
-					f.Label = "TOTP setup key"
-				}
-				r.explorer.Detail.Fields = append(r.explorer.Detail.Fields, f)
-			}
+		case "describe", "reveal":
+			r.explorer.Detail.setItem(m.Value.(vaultapi.ItemResponse), m.Kind == "reveal")
 			r.explorer.Update(LayoutMsg{}, size)
+			return r, r.refreshInlineOTP()
+
 		case "copy":
-			if err := r.writeClipboard(m.Value.(vaultapi.ReadResponse).Value); err != nil {
-				r.message = "Clipboard unavailable"
-			} else {
-				r.message = "Copied"
-			}
-		case "read":
-			r.explorer.Detail.Value = m.Value.(vaultapi.ReadResponse).Value
-			r.explorer.Detail.Revealed = true
-			r.explorer.Detail.Scroll = 0
+			r.writeCopy(m.Value.(vaultapi.ReadResponse).Value)
+
 		case "profiles":
 			r.profiles = m.Value.(ProfilesPage)
+			r.profiles.Light = r.light
 			r.profiles.Update(LayoutMsg{}, size)
 		case "reload", "logout":
 			return r, r.loadProfiles()
@@ -437,25 +456,33 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return r, nil
-	case revealMsg:
-		if r.otp != nil || r.busy && r.workKind == "sync" {
+	case copyFieldMsg:
+		if r.otp != nil || r.busy && r.workKind == "sync" || r.page != "explorer" {
 			return r, nil
 		}
+		d := &r.explorer.Detail
 		n := r.explorer.Tree.current()
-		if n == nil || n.Item == nil || n.Item.ID != m.ID || r.explorer.Focus != "detail" || len(r.explorer.Detail.Fields) == 0 || r.explorer.Detail.Fields[r.explorer.Detail.Index].Path != m.Field {
+		if n == nil || n.Item == nil || n.Item.ID != m.ID || r.explorer.Focus != "detail" || len(d.Fields) == 0 || d.Fields[d.Index].Key != m.Field {
 			return r, nil
 		}
-		if m.Field == "totp" {
-			return r, r.openOTP(m.ID)
+		if m.Field == "totp" && d.OTP != nil && time.Now().Before(d.OTP.Code.ExpiresAt) {
+			r.writeCopy(d.OTP.Code.Code)
+			return r, r.activity()
 		}
 		profile := r.profile
-		kind := "read"
-		if m.Copy {
-			kind = "copy"
-			r.explorer.Detail.clearValue()
-		}
-		return r, r.operation(kind, func(ctx context.Context) (any, error) {
-			return executor.Read(ctx, vaultapi.ReadRequest{Profile: profile, ID: m.ID, Field: m.Field})
+		return r, r.operation("copy", func(ctx context.Context) (any, error) {
+			if m.Field == "totp" {
+				code, err := executor.TOTP(ctx, vaultapi.TOTPRequest{Profile: profile, ID: m.ID})
+				return vaultapi.ReadResponse{Value: code.Code}, err
+			}
+			item, err := executor.Item(ctx, vaultapi.ItemRequest{Profile: profile, Item: m.ID, Field: m.Field})
+			if err != nil {
+				return nil, err
+			}
+			if len(item.Fields) != 1 || item.Fields[0].Value == nil {
+				return nil, errors.New("field unavailable")
+			}
+			return vaultapi.ReadResponse{Value: *item.Fields[0].Value}, nil
 		})
 	case tea.KeyPressMsg:
 		key := m.String()
@@ -503,7 +530,7 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				r.auth = nil
 				return r, nil
 			}
-			return r, r.auth.Input.Update(msg, Size{size.Width, 1})
+			return r, r.auth.Input.Update(msg, Size{max(0, min(72, size.Width)-4), 1})
 		}
 		if r.standaloneID != "" && r.otp == nil {
 			if key == "q" || key == "esc" {
@@ -543,13 +570,17 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return r, nil
 		}
+		if r.page == "explorer" && r.explorer.Detail.Expanded && (key == "q" || key == "esc") {
+			r.explorer.Detail.Expanded = false
+			return r, nil
+		}
 		if r.explorer.Focus != "search" || r.page != "explorer" {
 			if key == "q" {
 				r.purge()
 				return r, tea.Quit
 			}
 			if key == "?" {
-				if r.busy && (r.workKind == "read" || r.workKind == "copy") {
+				if r.busy && (r.workKind == "reveal" || r.workKind == "copy") {
 					if r.cancel != nil {
 						r.cancel()
 					}
@@ -562,6 +593,9 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if r.help {
+			if key == "esc" {
+				r.help = false
+			}
 			return r, nil
 		}
 		if r.busy && r.workKind == "sync" {
@@ -609,6 +643,20 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return r, nil
 		}
+		if key == "v" && r.explorer.Focus != "search" {
+			if r.explorer.Detail.Revealed || r.busy && r.workKind == "reveal" {
+				r.hideItem()
+				return r, nil
+			}
+			n := r.explorer.Tree.current()
+			if n == nil || n.Item == nil {
+				return r, nil
+			}
+			profile, id := r.profile, n.Item.ID
+			return r, r.operation("reveal", func(ctx context.Context) (any, error) {
+				return executor.Item(ctx, vaultapi.ItemRequest{Profile: profile, Item: id, Reveal: true})
+			})
+		}
 		if key == "r" && r.explorer.Focus != "search" {
 			return r, r.loadCatalog(true)
 		}
@@ -619,27 +667,27 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		r.explorer.Update(LayoutMsg{}, size)
 		if before != r.explorer.Tree.key() {
 			cmd = r.describe()
-		} else if (field != r.explorer.Detail.Index || oldFocus == "detail" && r.explorer.Focus != "detail") && r.busy && (r.workKind == "read" || r.workKind == "copy") {
+		} else if (field != r.explorer.Detail.Index || oldFocus == "detail" && r.explorer.Focus != "detail") && r.busy && r.workKind == "copy" {
 			if r.cancel != nil {
 				r.cancel()
 			}
 			r.epoch++
 			r.busy = false
 		}
-		if oldFocus == "detail" && r.explorer.Focus != "detail" {
-			r.explorer.Detail.clearValue()
+		if oldFocus != "search" && r.explorer.Focus == "search" {
+			r.hideItem()
 		}
 		return r, tea.Batch(cmd, r.activity())
 	}
 	// Cursor blink and paste messages belong only to the focused input.
 	if r.auth != nil {
-		return r, r.auth.Input.Update(msg, Size{size.Width, 1})
+		return r, r.auth.Input.Update(msg, Size{max(0, min(72, size.Width)-4), 1})
 	}
 	if r.page == "explorer" && r.explorer.Focus == "search" && r.state.State == "unlocked" {
 		before := r.explorer.Tree.key()
 		cmd := r.explorer.Update(msg, size)
 		left, _ := r.explorer.layout(size)
-		r.explorer.Tree.rebuild(r.explorer.Search.Value(), left)
+		r.explorer.Tree.rebuild(r.explorer.Search.Value(), inside(left))
 		if before != r.explorer.Tree.key() {
 			cmd = tea.Batch(cmd, r.describe())
 		}
@@ -652,45 +700,54 @@ func (r *Root) View() tea.View {
 	if r.standaloneID != "" {
 		title = fmt.Sprintf("bwb · %s · TOTP · %s", safe(r.profile), safe(r.state.State))
 	}
-	footer := "/ search  ←→ tree  Tab pane  Enter open  s sort  r sync  Ctrl+L lock  ? help  q quit"
-	body := "Vault locked · Enter to login/unlock"
 	size := r.contentSize()
+	body := panel("Vault", "Vault locked · Enter to login/unlock", size, true, r.light)
+	hints := "Enter unlock · Ctrl+P profiles · q quit"
 	if r.page == "profiles" {
 		body = r.profiles.View(size)
+		hints = "↑↓ profile · Tab config · Enter use · u unlock · l lock · x logout · r reload"
+		if r.profiles.DetailFocus {
+			hints = "↑↓ / PgUp/PgDown scroll · Tab profiles · r reload · Ctrl+P Explorer"
+		}
 	} else if r.state.State == "unlocked" {
 		body = r.explorer.View(size)
+		hints = r.explorer.hints()
 	}
+	status := "Ready · r sync · Ctrl+L lock · ? help · q quit"
 	if r.busy {
-		footer = "Working…  Esc in password dialog cancels · Ctrl+L lock · Ctrl+C quit"
+		status = "Working… · Ctrl+L lock · Ctrl+C quit"
 	}
 	if r.message != "" {
-		footer = r.message
+		status = r.message
 	}
 	if r.help {
-		body = "Explorer: / fuzzy search; directory matches include descendants.\nEnter/Esc leave search editing; Esc again restores the original tree.\nArrows or hjkl navigate; Tab changes pane; s reverses name order.\nExplorer: r syncs and refreshes, preserving search and tree position.\nEnter on a field reveals it; Enter hides it; y copies without revealing.\nPgUp/PgDown scroll value.\nCtrl+P opens Profiles; u authenticates; l locks; x logs out; r reloads.\nUser navigation renews idle time; polling does not.\nq quits without locking the daemon; Ctrl+L locks.\n? closes help."
+		content := "/ fuzzy search; directory matches include descendants.\nArrows or hjkl navigate; Tab changes pane; s reverses name order.\nr syncs and refreshes, preserving search and position.\nv reveals/hides the whole item; field and pane navigation keep reveal.\nChanging item, search, help, profiles or lock hides secrets.\ny copies a field immediately, even while hidden.\nEnter expands a field; PgUp/PgDown scroll; Esc returns.\nCtrl+P opens Profiles; r explicitly reloads the config file there.\nCtrl+L locks; q quits without locking the daemon.\n\n? or Esc closes help."
+		body = dialog("Help", content, body, size, r.light)
+		hints = "? / Esc close · q quit"
 	}
 	if r.otp != nil {
-		body = r.otp.View(size)
-		footer = "y copy · q close · Ctrl+L lock"
+		body = panel("Authentication code", r.otp.View(inside(size)), size, true, r.light)
+		hints = "y copy · q close · Ctrl+L lock"
 	}
 	if r.confirmLogout != "" {
-		body = "Remove saved authentication for " + safe(r.confirmLogout) + "? [y/N]"
+		body = dialog("Logout", "Remove saved authentication for "+safe(r.confirmLogout)+"? [y/N]", body, size, r.light)
+		hints = "y confirm · any other key cancel"
 	}
 	if r.state.State == "disconnected" {
-		body = "Daemon disconnected · Enter to reconnect"
+		message := "Daemon disconnected · Enter to reconnect"
 		if r.busy {
-			body = "Connecting… · Esc cancels"
+			message = "Connecting… · Esc cancels"
 		}
-		footer = "Enter reconnect · q quit"
-		if r.message != "" {
-			footer = r.message
-		}
+		body = panel("Connection", message, size, true, r.light)
+		hints = "Enter reconnect · q quit"
 	}
 	if r.auth != nil {
 		p := r.auth.Prompt.Request
-		body = fmt.Sprintf("%s %s\n%s at %s\n\n%s\n\nEnter submit · Esc cancel", safe(p.Action), safe(p.Profile), safe(p.Email), safe(p.Server), r.auth.Input.View(Size{size.Width, 1}))
+		content := fmt.Sprintf("%s %s\n%s at %s\n\n%s\n\nEnter submit · Esc cancel", safe(p.Action), safe(p.Profile), safe(p.Email), safe(p.Server), r.auth.Input.View(Size{max(0, min(72, size.Width)-4), 1}))
+		body = dialog("Authentication", content, body, size, r.light)
+		hints = "Enter submit · Esc cancel"
 	}
-	view := tea.NewView(box(title+"\n"+strings.Repeat("─", max(0, r.size.Width))+"\n"+box(body, size)+"\n"+safe(footer), r.size))
+	view := tea.NewView(box(title+"\n\n"+box(body, size)+"\n"+subdued(safe(status), r.light)+"\n"+safe(hints), r.size))
 	view.AltScreen = true
 	return view
 }

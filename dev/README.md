@@ -19,6 +19,29 @@ runner는 SHA-256 검사 → SQLite 복원·무결성 검사 → digest로 고�
 
 매 실행마다 임의의 `bwb-integration-*` 이름과 loopback 임시 포트를 사용한다. 기존 `dev/compose.yaml`의 개발 volume이나 사용자 bw 설정에는 접근하지 않는다. 동시에 여러 실행이 가능하다. 강제 kill/호스트 중단 시 임시 컨테이너가 남을 수 있으며 해당 실행의 컨테이너만 정리한다.
 
+## 수동 CLI / TUI 개발 환경
+
+```sh
+mise r dev:up
+mise r dev:run -- tui
+mise r dev:run -- item list
+mise r dev:run -- --profile restricted item list
+mise r dev:down
+```
+
+`dev:up`은 Python venv·고정 requirements를 준비하고, integration과 같은 checksum 검사와 SQL snapshot 복원으로 실제 Vaultwarden을 시작한다. Docker와 native credential store는 미리 실행되어 있어야 한다. `owner`(기본)와 `restricted` profile을 실제 로그인한다. 테스트 비밀번호는 `PUBLIC-INTEGRATION-ONLY-not-a-real-password!`다.
+
+서버는 loopback 임시 포트를 사용하며 `.dev/demo/`의 config/state, 고유 `BWB_INSTANCE`와 keychain namespace로 개인 환경 및 integration 실행과 격리한다. `dev:up` 재실행은 기존 서버와 설정을 유지하며 잠긴 profile을 자동 unlock하지 않는다. snapshot 변경이나 서버 중단 시 `dev:down` 후 `dev:up`으로 새로 준비한다. 동일 checkout의 환경 준비·정리는 순차 실행한다.
+
+`dev:run -- ...`은 준비된 환경에서 `go run . ...`을 실행하고 인자·터미널 입출력을 그대로 전달한다. 서버 준비나 전체 integration 테스트는 실행하지 않는다. 직접 실행하려면 별도 shell에서 다음을 사용한다:
+
+```sh
+source .dev/demo/env.sh
+go run . tui
+```
+
+TUI를 종료해도 환경은 유지된다. Go daemon 코드를 수정했다면 `mise r dev:run -- daemon update`로 실행 중인 daemon도 갱신한다. `dev:down`은 준비한 두 profile을 logout해 keychain을 정리한 뒤 daemon·전용 컨테이너·개발 데이터를 삭제한다. 정리가 실패하면 환경 정보를 보존하므로 문제 해결 후 다시 실행한다. 개발 환경에서 별도 profile을 직접 로그인했다면 먼저 해당 profile을 logout한다. `env.sh`를 source한 shell은 정리 후 닫는다.
+
 ## 현재 검증 범위
 
 - Go 제품 코드의 실제 prelogin, 잘못된 비밀번호 거부, 로그인, 명시적 refresh와 401 후 자동 refresh, sync.

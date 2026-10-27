@@ -1,0 +1,9 @@
+#!/bin/sh
+#MISE description="Run go run . with development vault isolation"
+set -eu
+cd "$MISE_PROJECT_ROOT"
+if [ ! -f .dev/demo/environment.json ]; then
+    echo 'Run mise r dev:up first' >&2
+    exit 1
+fi
+exec .dev/venv/bin/python dev/integration/demo.py run "$@"

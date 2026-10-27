@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>bwb · Explorer design</title>
+<style>
+:root { color-scheme:dark; --bg:#17191d; --fg:#dce0e5; --muted:#9299a3; --dim:#424953; --edge:#b8bec7; --selection:#303a46; --accent:#a3c8e5; --outside:#101215 }
+:root[data-theme=light] { color-scheme:light; --bg:#faf9f6; --fg:#252a31; --muted:#606873; --dim:#cbd0d6; --edge:#59636f; --selection:#e0e8ef; --accent:#285d82; --outside:#eeede9 }
+* { box-sizing:border-box }
+body { margin:0; background:var(--outside); color:var(--fg); font:14px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace }
+button,input { font:inherit; color:inherit }
+button { cursor:pointer }
+.controls { max-width:1180px; margin:32px auto 20px; display:flex; align-items:center; gap:8px; padding:0 24px; flex-wrap:wrap }
+.controls small { color:var(--muted); margin-right:auto }
+.controls button { background:transparent; border:1px solid var(--dim); border-radius:4px; padding:5px 12px }
+.controls button[aria-pressed=true] { border-color:var(--edge); background:var(--selection) }
+.terminal { max-width:1132px; height:730px; margin:0 auto; padding:18px 22px 12px; background:var(--bg); display:flex; flex-direction:column; gap:12px }
+.terminal.narrow { max-width:640px }
+header { display:flex; align-items:center; gap:22px; min-height:28px }
+header strong { font-weight:600 }
+header .state { margin-left:auto; color:var(--muted); font-size:12px }
+header button { background:none; border:0; padding:0 }
+main { display:grid; grid-template-columns:minmax(250px, 34%) minmax(0,1fr); grid-template-rows:minmax(0,1fr); gap:16px; min-height:0; flex:1 }
+.panel { position:relative; border:1px solid var(--dim); border-radius:5px; min-width:0; min-height:0; padding:20px 12px 10px; transition:border-color .1s }
+.panel.active { border-color:var(--edge) }
+.label { position:absolute; top:-12px; left:12px; padding:0 7px; background:var(--bg); color:var(--muted); font-size:13px }
+.panel.active .label { color:var(--fg) }
+.search { padding:12px 16px 8px; min-height:55px }
+.search label { color:var(--muted) }
+.search input { background:none; border:0; outline:none; width:calc(100% - 32px) }
+.search input::placeholder { color:var(--muted); opacity:1 }
+.tree { overflow-y:auto; height:100% }
+.row { display:block; width:100%; text-align:left; border:0; background:none; white-space:pre; overflow:hidden; text-overflow:ellipsis; padding:3px 6px }
+.row.selected { background:var(--selection); border-radius:2px }
+.count { float:right; color:var(--muted); font-size:12px }
+.detail { height:100%; overflow:auto; padding:0 8px }
+.item-title { font-size:14px; margin:0 0 4px; font-weight:600 }
+.meta { white-space:pre-line; color:var(--muted); font-size:12px; margin-bottom:12px }
+.section { margin:16px 0 7px; color:var(--muted); font-size:12px; letter-spacing:.07em }
+.field { display:grid; grid-template-columns:16px 115px minmax(0,1fr); gap:3px; padding:5px 6px; width:100%; text-align:left; border:0; background:none }
+.field.selected { background:var(--selection); border-radius:2px }
+.field .value { overflow-wrap:anywhere; white-space:pre-wrap }
+.field .key { color:var(--muted) }
+.mask { color:var(--muted) }
+.tag { color:var(--muted); font-size:12px; text-align:right; margin-bottom:12px }
+.tag.revealed { color:var(--accent) }
+footer { flex-shrink:0; min-height:48px; font-size:12px }
+#status { color:var(--muted); min-height:22px }
+#hints { white-space:normal }
+.note { max-width:1132px; margin:18px auto; padding:0 24px; color:var(--muted); font-size:12px }
+button:focus-visible { outline:1px solid var(--edge); outline-offset:2px }
+.narrow main { display:block }
+.narrow main .panel { height:100% }
+.narrow[data-pane=tree] #itemPanel,.narrow[data-pane=detail] #treePanel { display:none }
+.narrow header { gap:12px }
+.narrow header .state { font-size:11px }
+@media(max-width:760px) { .controls { margin-top:16px } .terminal { margin:0 12px; padding:16px 12px 10px; height:calc(100dvh - 160px); min-height:480px } main { display:block } main .panel { height:100% } [data-pane=tree] #itemPanel,[data-pane=detail] #treePanel { display:none } header { gap:10px } header .state { font-size:10px } .field { grid-template-columns:12px 112px minmax(0,1fr) } }
+</style>
+<div class="controls" aria-label="Preview controls">
+  <small>bwb / design study 01 · synthetic data</small>
+  <button id="dark" aria-pressed="true">Dark</button><button id="light" aria-pressed="false">Light</button>
+  <button id="width" aria-pressed="false">Narrow</button>
+  <button id="reveal" aria-pressed="false">Reveal item · v</button>
+</div>
+<div class="terminal" id="terminal" data-pane="tree">
+ <header><strong>bwb</strong><span>work / Explorer</span><span class="state">Unlocked · Synced 2m ago</span></header>
+ <section class="panel search" id="searchPanel"><span class="label">Search</span><label for="query">/ </label><input id="query" placeholder="Search items and collections…" autocomplete="off" spellcheck="false"></section>
+ <main>
+  <section class="panel active" id="treePanel" aria-label="Explorer"><span class="label">Explorer <span id="matches"></span></span><div class="tree" id="tree"></div></section>
+  <section class="panel" id="itemPanel" aria-label="Item"><span class="label">Item</span><div class="detail" id="detail"></div></section>
+ </main>
+ <footer><div id="status" role="status">Ready</div><div id="hints"></div></footer>
+</div>
+<p class="note">Click a panel or use Tab. / search · ↑↓ / j k navigate · ←→ collapse / expand · Enter open · v reveal / hide item · y simulate copy · Esc back.<br>Preview only: no vault connection or clipboard writes. Both themes use identical, single-width borders.</p>
+<script>
+const $ = id => document.getElementById(id);
+const items = {
+ github: { name:'GitHub',type:'Login',org:'Acme',collections:'Engineering, Production', fields:[['CREDENTIALS','Username','dev@example.com'],['CREDENTIALS','Password','demo-only-github-password',true],['CREDENTIALS','TOTP','482 193 · 12s (preview)',true],['WEBSITES','URL','https://github.com'],['CUSTOM FIELDS','Environment','Production'],['CUSTOM FIELDS','API token','demo-only-api-token',true],['NOTES','Notes','Deployment account. Shared with the release team.']] },
+ actions: { name:'GitHub Actions',type:'Login',org:'Acme',collections:'Engineering',fields:[['CREDENTIALS','Username','release-bot'],['CREDENTIALS','Password','demo-only-bot-password',true],['WEBSITES','URL','https://github.com/acme'],['NOTES','Notes','Automation account for release workflows.']] },
+ ssh: {name:'Production SSH',type:'SSH key',org:'Acme',collections:'Production',fields:[['KEYS','Public key','ssh-ed25519 AAAA… demo@example.invalid'],['KEYS','Private key','-----BEGIN DEMO KEY-----\nSynthetic preview data only\n-----END DEMO KEY-----',true],['NOTES','Notes','Operations access.']]},
+ note: {name:'Recovery codes',type:'Secure note',org:'Personal',collections:'',fields:[['SECURE NOTE','Notes','demo-0001\ndemo-0002\ndemo-0003',true]]}
+};
+const roots = [{name:'Acme',children:[{name:'Engineering',children:[{item:'github'},{item:'actions'}]},{name:'Production',children:[{item:'github'},{item:'ssh'}]}]},{name:'Personal',children:[{item:'note'}]}];
+let focus='tree', selected='0/0/0', itemID='github', field=1, revealed=false, visible=[], collapsed=new Set();
+function fuzzy(text,q) { let at=0; for(const c of text.toLowerCase()) if(c===q[at]) at++; return at===q.length; }
+function rows() {
+ const q=$('query').value.toLowerCase().trim();
+ function visit(node,path,depth,inherited) {
+  const name=node.item?items[node.item].name:node.name;
+  const own=!q||fuzzy(name,q), include=inherited||own;
+  const children=(node.children||[]).flatMap((n,i)=>visit(n,path+'/'+i,depth+1,include));
+  if(!include&&!children.length) return [];
+  const row={...node,path,depth,name};
+  return [row,...(!q&&collapsed.has(path)?[]:children)];
+ }
+ return roots.flatMap((n,i)=>visit(n,String(i),0,false));
+}
+function select(path) {
+ const row=visible.find(r=>r.path===path); if(!row) return;
+ selected=path;
+ const next=row.item||null;
+ if(next!==itemID) { itemID=next; revealed=false; field=1; }
+ render();
+}
+function setFocus(next) {
+ focus=next;
+ if(next==='search') { revealed=false; $('query').focus(); }
+ else $('query').blur();
+ render();
+}
+function reveal() { if(!itemID) return; revealed=!revealed; $('status').textContent=revealed?'Item secrets revealed':'Item secrets hidden'; render(); }
+function render() {
+ visible=rows();
+ if(!visible.some(r=>r.path===selected)) { selected=visible[0]?.path||''; itemID=visible[0]?.item||null; revealed=false; }
+ $('terminal').dataset.pane=focus==='detail'?'detail':'tree';
+ for(const [name,id] of [['search','searchPanel'],['tree','treePanel'],['detail','itemPanel']]) $(id).classList.toggle('active',focus===name);
+ $('matches').textContent='· '+new Set(visible.filter(r=>r.item).map(r=>r.item)).size+' items';
+ $('tree').replaceChildren();
+ if(!visible.length) $('tree').textContent='No matches. Esc clears search.';
+ for(const row of visible) {
+  const b=document.createElement('button'); b.tabIndex=-1; b.className='row'+(row.path===selected?' selected':'');
+  const marker=row.item?(row.path===selected?'›':' '):(collapsed.has(row.path)&&!$('query').value?'▸':'▾');
+  b.textContent='  '.repeat(row.depth)+marker+' '+row.name;
+  b.onclick=()=>{setFocus('tree');select(row.path)};
+  b.ondblclick=()=>openSelected(); $('tree').append(b);
+ }
+ $('detail').replaceChildren();
+ const add=(tag,cls,text)=>{const e=document.createElement(tag);e.className=cls;e.textContent=text;$('detail').append(e);return e};
+ if(!itemID) {
+  const row=visible.find(r=>r.path===selected);
+  add('h1','item-title',row?.name||'No item selected');
+  add('p','meta',row?'Collection · Enter to expand or collapse':'Try another search.');
+ } else {
+  const item=items[itemID]; field=Math.min(field,item.fields.length-1);
+  add('h1','item-title',item.name); add('div','meta',item.type+' · '+item.org+(item.collections?'\n'+item.collections:''));
+  add('div','tag'+(revealed?' revealed':''),revealed?'Secrets revealed · v hide':'Secrets hidden · v reveal');
+  let section='';
+  item.fields.forEach(([group,label,value,secret],i)=>{
+   if(group!==section) { add('div','section',group);section=group; }
+   const b=add('button','field'+(field===i?' selected':''),''); b.tabIndex=-1;
+   for(const [cls,text] of [['',field===i?'›':''],['key',label],['value'+(secret&&!revealed?' mask':''),secret&&!revealed?'••••••••••••':value]]) {const span=document.createElement('span');span.className=cls;span.textContent=text;b.append(span)}
+   b.onclick=()=>{field=i;setFocus('detail')};
+  });
+ }
+ $('reveal').textContent=revealed?'Hide item · v':'Reveal item · v'; $('reveal').setAttribute('aria-pressed',String(revealed)); $('reveal').disabled=!itemID;
+ $('hints').textContent=focus==='search'?'Type to filter   Enter return to Explorer   Esc clear':focus==='detail'?'j/k field   y copy   v reveal / hide item   Tab Explorer   Esc back':'j/k navigate   ←→ tree   Enter open   / search   Tab Item   v reveal / hide item';
+}
+function openSelected() {
+ const row=visible.find(r=>r.path===selected); if(!row) return;
+ if(row.item) setFocus('detail'); else {collapsed.has(selected)?collapsed.delete(selected):collapsed.add(selected);render()}
+}
+function theme(name) { document.documentElement.dataset.theme=name; for(const t of ['dark','light']) $(t).setAttribute('aria-pressed',String(name===t)); }
+$('dark').onclick=()=>theme('dark'); $('light').onclick=()=>theme('light');
+$('width').onclick=()=>{const narrow=$('terminal').classList.toggle('narrow');$('width').setAttribute('aria-pressed',String(narrow))};
+$('reveal').onclick=reveal;
+$('query').onfocus=()=>{if(focus!=='search') setFocus('search')};
+$('query').oninput=()=>{revealed=false;render()};
+$('treePanel').addEventListener('click',e=>{if(e.target===e.currentTarget)setFocus('tree')});
+$('itemPanel').addEventListener('click',e=>{if(!e.target.closest('button'))setFocus('detail')});
+document.addEventListener('keydown',e=>{
+ if(e.ctrlKey||e.metaKey||e.altKey) return;
+ if(focus==='search' && !['Escape','Enter','Tab'].includes(e.key)) return;
+ if(!['Tab','/','Escape','Enter','v','y','j','k','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) return;
+ e.preventDefault();
+ if(e.key==='Tab') {setFocus(focus==='tree'?'detail':'tree');return}
+ if(e.key==='/') {setFocus('search');return}
+ if(e.key==='Escape') {if(focus==='search'||focus==='tree')$('query').value='';setFocus('tree');return}
+ if(e.key==='Enter') {if(focus==='search')setFocus('tree');else if(focus==='tree')openSelected();return}
+ if(e.key==='v') {reveal();return}
+ if(e.key==='y') {if(focus==='detail'&&itemID)$('status').textContent='Copy preview · '+items[itemID].fields[field][1]+' (clipboard unchanged)';return}
+ if(focus==='tree'&&['ArrowLeft','ArrowRight'].includes(e.key)) {
+  const row=visible.find(r=>r.path===selected); if(!row) return;
+  if(e.key==='ArrowRight'&&!row.item)collapsed.delete(selected);
+  if(e.key==='ArrowLeft') {if(!row.item&&!collapsed.has(selected))collapsed.add(selected);else {const parent=selected.slice(0,selected.lastIndexOf('/'));if(parent!==selected)select(parent)}}
+  render();return;
+ }
+ const delta=['j','ArrowDown'].includes(e.key)?1:['k','ArrowUp'].includes(e.key)?-1:0;
+ if(focus==='tree')select(visible[Math.max(0,Math.min(visible.length-1,visible.findIndex(r=>r.path===selected)+delta))]?.path);
+ if(focus==='detail'&&itemID){field=Math.max(0,Math.min(items[itemID].fields.length-1,field+delta));render();$('detail').querySelector('.field.selected')?.scrollIntoView({block:'nearest'})}
+});
+theme(new URLSearchParams(location.search).get('theme')||(matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'));
+render();
+const preview = new URLSearchParams(location.search);
+if(preview.has('narrow')) $('width').click();
+if(preview.get('focus')==='detail') setFocus('detail');
+if(preview.has('revealed')) reveal();
+// Browser-run acceptance checks; all data is synthetic and no external services are used.
+if(new URLSearchParams(location.search).has('test')) {
+ const check=(ok,msg)=>{if(!ok)throw Error(msg)};
+ try {
+  check(document.querySelectorAll('.panel.active').length===1,'one focused panel');
+  const border=getComputedStyle($('treePanel')).borderWidth;
+  setFocus('detail');check(getComputedStyle($('itemPanel')).borderWidth===border,'same border width');
+  reveal();check($('detail').textContent.includes('demo-only-github-password'),'item reveal');
+  field=2;render();check(revealed,'field navigation keeps reveal');
+  check($('itemPanel').getBoundingClientRect().bottom <= document.querySelector('footer').getBoundingClientRect().top,'panel does not overlap footer');
+  setFocus('tree');check(revealed,'pane switch keeps reveal');
+  select('0/0/1');check(!revealed,'item change hides secrets');
+  $('query').value='Engineering';setFocus('search');check(visible.some(r=>r.item==='actions')&&visible.some(r=>r.item==='github')&&!visible.some(r=>r.item==='ssh'),'directory match includes descendants');
+  $('query').value='ghact';render();check(visible.filter(r=>r.item).length===1&&visible.some(r=>r.name==='Engineering'),'fuzzy item preserves ancestors');
+  $('query').value='no-result';render();check(!visible.length&&!itemID,'empty results clear detail');
+  theme('light');check(document.documentElement.dataset.theme==='light','light theme');
+  $('width').click();setFocus('detail');check(getComputedStyle($('treePanel')).display==='none','narrow pane');
+  $('width').click();$('query').value='';selected='0/0/0';itemID='github';field=1;revealed=false;setFocus('tree');
+  document.body.dataset.test='passed';$('status').textContent='Design checks passed';
+ } catch(e) {document.body.dataset.test='failed';$('status').textContent=e.message;throw e}
+}
+</script>
+</html>

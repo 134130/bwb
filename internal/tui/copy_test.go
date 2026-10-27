@@ -14,7 +14,7 @@ func copyRoot(t *testing.T) *Root {
 	t.Cleanup(cancel)
 	r := &Root{ctx: ctx, page: "explorer", size: Size{120, 34}, explorer: newExplorer(), state: vaultapi.StatusResponse{State: "unlocked"}, epoch: 3, busy: true, workKind: "copy", cancel: cancel}
 	r.explorer.Focus = "detail"
-	r.explorer.Detail.Fields = []bitwarden.FieldInfo{{Path: "login/password"}, {Path: "login/username"}}
+	r.explorer.Detail.Fields = []bitwarden.ItemField{{Key: "password"}, {Key: "username"}}
 	return r
 }
 func TestCopyResultNeverRevealsValue(t *testing.T) {
@@ -22,7 +22,7 @@ func TestCopyResultNeverRevealsValue(t *testing.T) {
 	copied := ""
 	r.writeClipboard = func(value string) error { copied = value; return nil }
 	r.Update(resultMsg{Epoch: 3, Kind: "copy", Value: vaultapi.ReadResponse{Value: "secret"}})
-	if copied != "secret" || r.message != "Copied" || r.explorer.Detail.Value != "" || r.explorer.Detail.Revealed {
+	if copied != "secret" || r.message != "Copied" || secretValue(&r.explorer.Detail) != "" || r.explorer.Detail.Revealed {
 		t.Fatal("copy revealed or failed")
 	}
 }
@@ -35,10 +35,10 @@ func TestNavigationAndLockDiscardLateCopy(t *testing.T) {
 	}
 }
 func TestDetailCopyRequestsSelectedField(t *testing.T) {
-	d := Detail{Node: &Node{Item: &vaultapi.ListEntry{ID: "id"}}, Fields: []bitwarden.FieldInfo{{Path: "login/password"}}}
+	d := Detail{Node: &Node{Item: &vaultapi.ListEntry{ID: "id"}}, Fields: testFields("secret")}
 	cmd := d.Update(tea.KeyPressMsg{Code: 'y', Text: "y"}, Size{60, 20})
-	request := cmd().(revealMsg)
-	if !request.Copy || request.ID != "id" || request.Field != "login/password" {
+	request := cmd().(copyFieldMsg)
+	if request.ID != "id" || request.Field != "password" {
 		t.Fatal(request)
 	}
 }
