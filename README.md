@@ -183,7 +183,7 @@ bwb --profile personal tui
 
 검색·탐색 같은 실제 사용자 조작은 최대 초당 한 번 Activity RPC로 idle 시간을 갱신한다. 백그라운드 목록·필드 이름 조회와 상태 polling은 시간을 연장하지 않는다. 비밀 필드 조회는 CLI와 같은 기존 활동 정책을 따른다. CLI에서는 상세에 표시된 `url/1` 같은 키로 URL을 읽는다.
 
-Profiles는 TOML에 정의된 profile과 SQLite에 저장된 로그인 profile을 함께 보여준다. 파일 값과 적용값을 비교하고 파일 오류를 표시하며, 파일 오류 중에도 잠금·logout이 가능하다. 편집·클립보드 복사·자동 sync는 아직 제공하지 않는다.
+Profiles는 TOML에 정의된 profile과 SQLite에 저장된 로그인 profile을 함께 보여준다. 파일 값과 적용값을 비교하고 파일 오류를 표시하며, 파일 오류 중에도 잠금·logout이 가능하다. 편집·자동 sync는 아직 제공하지 않는다.
 
 
 ### TOTP
@@ -212,3 +212,6 @@ bwb: daemon v0.3.0 is older than CLI v0.4.0. Run: bwb daemon update
 ```
 
 자동 교체는 실행 중 daemon의 config 경로를 유지하고 파일을 먼저 검증한다. 모든 profile의 메모리 세션과 진행 작업은 재시작으로 종료된다. 현재 대화형 명령은 필요한 인증을 거쳐 계속하며 다른 TUI는 기존 재연결 흐름을 따른다. 자동 업데이트끼리는 버전 확인·교체를 직렬화한다. 명시적 `daemon update`는 버전과 무관한 수동 교체 동작을 유지한다. 교체 실패는 오류로 반환하며 daemonkit의 바이너리·프로세스 롤백을 사용한다. 데이터 마이그레이션 롤백은 포함하지 않는다.
+
+
+일반 필드는 TUI 상세에서 `y`로 화면에 드러내지 않고 복사한다. CLI는 `bwb item read ITEM --field password --copy`를 사용한다. 성공 메시지 `Copied`는 stderr에만 출력하며 stdout은 비운다. `--copy`는 단일 `--field`가 필요하며 `--reveal`·JSON 출력과 함께 사용할 수 없다. 클립보드 실패 시 평문 출력으로 대체하지 않는다. TUI에서 필드·pane 이동, 잠금, 도움말 전환 등으로 취소된 조회 결과는 복사하지 않는다. 복사한 값은 기존 TOTP와 마찬가지로 자동 삭제하지 않는다.

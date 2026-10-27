@@ -172,7 +172,7 @@ CLI / TUI ─ typed local RPC ─ vault service
 - list/search는 unlock 이후 첫 목록 요청에서 만든 이름·소속 metadata index를 재사용한다. 원문 비밀 필드는 복호화하거나 index에 담지 않는다. 성공한 login/unlock/sync와 lock/logout/shutdown에서 index 참조를 폐기한다. 상세는 필요한 항목을 메모리의 암호문 snapshot에서 복호화한다. cache-only 조회는 HTTP와 subprocess 0회가 기준이다.
 - RPC 메시지 64 KiB에 맞춰 목록은 byte budget으로 페이지 처리한다. page cursor는 snapshot generation에 묶고 변경 시 재시작을 요구한다. 한도를 넘는 단일 값은 명시적 오류이며 비밀을 잘라 성공 처리하지 않는다.
 - TUI는 profile/auth/vault 상태·last_sync, 검색 목록, 상세, 일시적 reveal, lock/sync/quit를 제공한다. profile/item/focus 변경과 lock에서 reveal을 지운다. TUI 종료는 daemon lock과 다르다.
-- 키보드 조작, 색상 외 상태 표시, 작은 화면/Unicode/긴 값 처리를 지원한다. clipboard는 후속이다.
+- 키보드 조작, 색상 외 상태 표시, 작은 화면/Unicode/긴 값 처리를 지원한다. 상세의 y는 선택 필드를 화면에 노출하지 않고 복사한다.
 
 ## 8. Full integration과 구현 순서
 

@@ -15,6 +15,8 @@ import sys
 import termios
 import time
 
+from pathlib import Path
+
 import pyte
 
 
@@ -179,6 +181,11 @@ def main():
             else:
                 raise AssertionError('password field not reachable')
             assert secret not in view()
+            clipboard_file = Path(os.environ['BWB_CLIPBOARD_FILE'])
+            clipboard_file.write_text('')
+            send('y')
+            until(lambda: 'Copied' in view())
+            assert secret not in view() and clipboard_file.read_text() == secret
             send('\r')
             until(lambda: secret in view())
             send('r')

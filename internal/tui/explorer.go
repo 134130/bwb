@@ -8,7 +8,10 @@ import (
 	"github.com/134130/bwb/internal/bitwarden"
 )
 
-type revealMsg struct{ ID, Field string }
+type revealMsg struct {
+	ID, Field string
+	Copy      bool
+}
 type Detail struct {
 	Node                  *Node
 	Fields                []bitwarden.FieldInfo
@@ -32,11 +35,11 @@ func (d *Detail) Update(msg tea.Msg, size Size) tea.Cmd {
 			d.Scroll += max(1, size.Height/2)
 		case "pgup":
 			d.Scroll = max(0, d.Scroll-max(1, size.Height/2))
-		case "enter":
-			if d.Revealed {
+		case "enter", "y":
+			if d.Revealed && key.String() == "enter" {
 				d.clearValue()
 			} else if d.Node != nil && d.Node.Item != nil && len(d.Fields) > 0 {
-				m := revealMsg{d.Node.Item.ID, d.Fields[d.Index].Path}
+				m := revealMsg{ID: d.Node.Item.ID, Field: d.Fields[d.Index].Path, Copy: key.String() == "y"}
 				return func() tea.Msg { return m }
 			}
 		}
@@ -73,9 +76,9 @@ func (d *Detail) View(size Size) string {
 	if d.Revealed {
 		content := d.valueLines(size)
 		start := min(d.Scroll, max(0, len(content)-1))
-		return box(title+"\nEnter hide · PgUp/PgDown scroll\n\n"+strings.Join(content[start:], "\n"), size)
+		return box(title+"\nEnter hide · y copy · PgUp/PgDown scroll\n\n"+strings.Join(content[start:], "\n"), size)
 	}
-	lines := []string{title, "", "Enter reveals selected field"}
+	lines := []string{title, "", "Enter reveals selected field · y copies"}
 	for i := d.Offset; i < min(len(d.Fields), d.Offset+max(1, size.Height-6)); i++ {
 		line := safe(d.Fields[i].Label) + "  ••••••••"
 		if i == d.Index {

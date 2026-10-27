@@ -43,26 +43,27 @@ type authDialog struct {
 
 // Root alone stores terminal size. Every child receives content constraints.
 type Root struct {
-	connect       func(context.Context) (*kit.Client, error)
-	otp           *OTPPage
-	standaloneID  string
-	workKind      string
-	ctx           context.Context
-	client        *kit.Client
-	executor      vaultclient.Executor
-	size          Size
-	profile, page string
-	state         vaultapi.StatusResponse
-	explorer      ExplorerPage
-	profiles      ProfilesPage
-	auth          *authDialog
-	epoch         uint64
-	cancel        context.CancelFunc
-	busy          bool
-	message       string
-	confirmLogout string
-	help          bool
-	lastActivity  time.Time
+	writeClipboard func(string) error
+	connect        func(context.Context) (*kit.Client, error)
+	otp            *OTPPage
+	standaloneID   string
+	workKind       string
+	ctx            context.Context
+	client         *kit.Client
+	executor       vaultclient.Executor
+	size           Size
+	profile, page  string
+	state          vaultapi.StatusResponse
+	explorer       ExplorerPage
+	profiles       ProfilesPage
+	auth           *authDialog
+	epoch          uint64
+	cancel         context.CancelFunc
+	busy           bool
+	message        string
+	confirmLogout  string
+	help           bool
+	lastActivity   time.Time
 }
 
 func Run(ctx context.Context, profile string, client *kit.Client, connect func(context.Context) (*kit.Client, error), input io.Reader, output io.Writer) error {
@@ -76,6 +77,7 @@ func run(ctx context.Context, profile, id string, client *kit.Client, connect fu
 	defer cancel()
 	root := &Root{ctx: ctx, client: client, profile: profile, page: "explorer", explorer: newExplorer()}
 	var program *tea.Program
+	root.writeClipboard = clipboard.WriteAll
 	root.connect = connect
 	root.standaloneID = id
 	defer func() { root.purge(); root.client.Close() }()
@@ -409,6 +411,12 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				r.explorer.Detail.Fields = append(r.explorer.Detail.Fields, f)
 			}
 			r.explorer.Update(LayoutMsg{}, size)
+		case "copy":
+			if err := r.writeClipboard(m.Value.(vaultapi.ReadResponse).Value); err != nil {
+				r.message = "Clipboard unavailable"
+			} else {
+				r.message = "Copied"
+			}
 		case "read":
 			r.explorer.Detail.Value = m.Value.(vaultapi.ReadResponse).Value
 			r.explorer.Detail.Revealed = true
@@ -436,7 +444,12 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return r, r.openOTP(m.ID)
 		}
 		profile := r.profile
-		return r, r.operation("read", func(ctx context.Context) (any, error) {
+		kind := "read"
+		if m.Copy {
+			kind = "copy"
+			r.explorer.Detail.clearValue()
+		}
+		return r, r.operation(kind, func(ctx context.Context) (any, error) {
 			return executor.Read(ctx, vaultapi.ReadRequest{Profile: profile, ID: m.ID, Field: m.Field})
 		})
 	case tea.KeyPressMsg:
@@ -505,7 +518,7 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return r, tea.Quit
 				}
 			case "y":
-				r.copyOTP(clipboard.WriteAll)
+				r.copyOTP(r.writeClipboard)
 				return r, r.activity()
 			case "enter":
 				if r.otp.Stopped {
@@ -531,7 +544,7 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return r, tea.Quit
 			}
 			if key == "?" {
-				if r.busy && r.workKind == "read" {
+				if r.busy && (r.workKind == "read" || r.workKind == "copy") {
 					if r.cancel != nil {
 						r.cancel()
 					}
@@ -601,7 +614,7 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		r.explorer.Update(LayoutMsg{}, size)
 		if before != r.explorer.Tree.key() {
 			cmd = r.describe()
-		} else if (field != r.explorer.Detail.Index || oldFocus == "detail" && r.explorer.Focus != "detail") && r.busy && r.workKind == "read" {
+		} else if (field != r.explorer.Detail.Index || oldFocus == "detail" && r.explorer.Focus != "detail") && r.busy && (r.workKind == "read" || r.workKind == "copy") {
 			if r.cancel != nil {
 				r.cancel()
 			}
@@ -649,7 +662,7 @@ func (r *Root) View() tea.View {
 		footer = r.message
 	}
 	if r.help {
-		body = "Explorer: / fuzzy search; directory matches include descendants.\nEnter/Esc leave search editing; Esc again restores the original tree.\nArrows or hjkl navigate; Tab changes pane; s reverses name order.\nExplorer: r syncs and refreshes, preserving search and tree position.\nEnter on a field reveals it; Enter hides it; PgUp/PgDown scroll value.\nCtrl+P opens Profiles; u authenticates; l locks; x logs out; r reloads.\nUser navigation renews idle time; polling does not.\nq quits without locking the daemon; Ctrl+L locks.\n? closes help."
+		body = "Explorer: / fuzzy search; directory matches include descendants.\nEnter/Esc leave search editing; Esc again restores the original tree.\nArrows or hjkl navigate; Tab changes pane; s reverses name order.\nExplorer: r syncs and refreshes, preserving search and tree position.\nEnter on a field reveals it; Enter hides it; y copies without revealing.\nPgUp/PgDown scroll value.\nCtrl+P opens Profiles; u authenticates; l locks; x logs out; r reloads.\nUser navigation renews idle time; polling does not.\nq quits without locking the daemon; Ctrl+L locks.\n? closes help."
 	}
 	if r.otp != nil {
 		body = r.otp.View(size)

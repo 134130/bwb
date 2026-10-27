@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,18 +14,22 @@ import (
 	"text/tabwriter"
 
 	"github.com/134130/bwb/internal/vaultapi"
+	"github.com/atotto/clipboard"
 	"github.com/spf13/cobra"
 )
 
 func itemCommand(totp bool, profile *string, nonInteractive *bool) *cobra.Command {
 	req := vaultapi.ItemRequest{TOTP: totp}
 	var format string
-	var syncFirst bool
+	var syncFirst, copyField bool
 	use, short := "read ITEM", "Show an item and its field keys; select one value with --field"
 	if totp {
 		use, short = "totp ITEM", "Generate the current TOTP code without returning its seed"
 	}
 	cmd := &cobra.Command{Use: use, Short: short, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		if copyField && (req.Field == "" || req.Reveal || format != "text") {
+			return errors.New("--copy requires --field and cannot be combined with --reveal or --format json")
+		}
 		if format != "text" && format != "json" {
 			return errors.New("format must be text or json")
 		}
@@ -57,12 +62,16 @@ func itemCommand(totp bool, profile *string, nonInteractive *bool) *cobra.Comman
 		if err != nil {
 			return err
 		}
+		if copyField {
+			return copyItem(cmd.Context(), cmd.ErrOrStderr(), result, clipboard.WriteAll)
+		}
 		return writeItem(cmd.OutOrStdout(), format, *profile, result, req.Field != "" || totp)
 	}}
 	cmd.Long = short + ".\nITEM is a UUID or an exact case-insensitive name. Duplicate names require an ID.\nReads use the cached vault; pass --sync to refresh first."
 	cmd.Flags().StringVar(&format, "format", "text", "Output format: text or json")
 	cmd.Flags().BoolVar(&syncFirst, "sync", false, "Sync before reading")
 	if !totp {
+		cmd.Flags().BoolVar(&copyField, "copy", false, "Copy the selected field instead of printing it")
 		cmd.Flags().StringVar(&req.Field, "field", "", "Return one field value; omit to discover available keys")
 		cmd.Flags().BoolVar(&req.Reveal, "reveal", false, "Show hidden values in the item details")
 		cmd.Example = "  bwb item read 'Example account'\n  bwb item read ITEM_ID --field password\n  bwb item read ITEM_ID --reveal --format json"
@@ -138,5 +147,19 @@ func writeItem(out io.Writer, format, profile string, result vaultapi.ItemRespon
 		}
 	}
 	_, err := out.Write(buffer.Bytes())
+	return err
+}
+
+func copyItem(ctx context.Context, out io.Writer, result vaultapi.ItemResponse, write func(string) error) error {
+	if len(result.Fields) != 1 || result.Fields[0].Value == nil {
+		return errors.New("item response has no field value")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := write(*result.Fields[0].Value); err != nil {
+		return errors.New("clipboard unavailable")
+	}
+	_, err := fmt.Fprintln(out, "Copied")
 	return err
 }

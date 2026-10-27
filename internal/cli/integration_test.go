@@ -65,6 +65,17 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(state, "config"))
 	t.Setenv("BWB_CONFIG", "")
 	t.Setenv("BWB_PROFILE", "")
+	// Replace OS clipboard commands before starting any CLI/TUI child.
+	clipboardDir := t.TempDir()
+	clipboardFile := filepath.Join(clipboardDir, "value")
+	for _, name := range []string{"pbcopy", "xclip", "wl-copy", "wl-paste"} {
+		if err := os.WriteFile(filepath.Join(clipboardDir, name), []byte("#!/bin/sh\nif [ -e \"$BWB_CLIPBOARD_FILE.fail\" ]; then exit 1; fi\ncat > \"$BWB_CLIPBOARD_FILE\"\n"), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", clipboardDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("BWB_CLIPBOARD_FILE", clipboardFile)
+
 	instance := uuid.NewString()
 	target, err := url.Parse(server)
 	if err != nil {
@@ -288,6 +299,27 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 		t.Fatal("offline sync succeeded")
 	}
 	id := manifest.Items["20000000-0000-4000-8000-000000000001"]
+	copyCommand := exec.Command(binary, "item", "read", id, "--field", "password", "--copy")
+	copyCommand.Env = append(os.Environ(), "XDG_STATE_HOME="+state, "BWB_INSTANCE="+instance)
+	var copyOut, copyErr bytes.Buffer
+	copyCommand.Stdout, copyCommand.Stderr = &copyOut, &copyErr
+	if err := copyCommand.Run(); err != nil || copyOut.Len() != 0 || copyErr.String() != "Copied\n" {
+		t.Fatal("CLI copy output", err)
+	}
+	copied, err := os.ReadFile(clipboardFile)
+	if err != nil || string(copied) != "DEMO-only-password-1!" {
+		t.Fatal("CLI copy mismatch", err)
+	}
+	if err := os.WriteFile(clipboardFile+".fail", nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := run("", "item", "read", id, "--field", "password", "--copy"); err == nil || !strings.Contains(output, "clipboard unavailable") || strings.Contains(output, "DEMO-only") {
+		t.Fatal("copy failure handling", err)
+	}
+	if err := os.Remove(clipboardFile + ".fail"); err != nil {
+		t.Fatal(err)
+	}
+
 	must("", "DEMO-only-password-1!", "item", "read", id, "--field", "password")
 	offline.Store(false)
 	if _, err := run("", "item", "list", "--search", "GitHub", "--sync", "--format", "json"); err != nil {
