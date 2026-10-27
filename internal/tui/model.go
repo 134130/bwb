@@ -101,7 +101,7 @@ func run(ctx context.Context, profile, id string, client *kit.Client, connect fu
 func tick() tea.Cmd {
 	return tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg { return tickMsg(t) })
 }
-func (r *Root) Init() tea.Cmd     { return tea.Batch(r.load(), tick()) }
+func (r *Root) Init() tea.Cmd     { return tea.Batch(r.load(), tick(), r.watchConnection()) }
 func (r *Root) contentSize() Size { return Size{max(0, r.size.Width), max(0, r.size.Height-3)} }
 func (r *Root) operation(kind string, call func(context.Context) (any, error)) tea.Cmd {
 	if r.cancel != nil {
@@ -284,6 +284,11 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return r, tea.Batch(tick(), r.poll())
+	case disconnected:
+		if m.client != r.client || r.state.State == "disconnected" {
+			return r, nil
+		}
+		return r.Update(statusMsg{Epoch: r.epoch, Err: m.err})
 	case statusMsg:
 		if m.Epoch != r.epoch {
 			return r, nil
@@ -371,9 +376,9 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			r.executor.Client = connection.client
 			r.state = vaultapi.StatusResponse{}
 			if r.page == "profiles" {
-				return r, r.loadProfiles()
+				return r, tea.Batch(r.loadProfiles(), r.watchConnection())
 			}
-			return r, r.load()
+			return r, tea.Batch(r.load(), r.watchConnection())
 		case "otp":
 			r.epoch++
 			if r.otp != nil {

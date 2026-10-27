@@ -3,10 +3,10 @@ package daemon
 
 import (
 	"context"
-	"github.com/134130/bwb/internal/config"
 	"os"
 	"runtime/debug"
 
+	"github.com/134130/bwb/internal/config"
 	"github.com/134130/bwb/internal/vault"
 	"github.com/134130/bwb/internal/vaultapi"
 	kit "github.com/134130/go-daemonkit"
@@ -24,7 +24,7 @@ func Options() kit.Options {
 	}
 	return kit.Options{AppID: "bwb", Version: version, InstanceID: os.Getenv("BWB_INSTANCE")}
 }
-func Manager() (*kit.Manager, error) { return kit.NewManager(Options(), "daemon", "run") }
+func Manager() (*kit.Manager, error) { return launchManager(os.Getenv("BWB_CONFIG")) }
 
 func Run(ctx context.Context, configFlag string) error {
 	path, explicit, err := config.Path(configFlag)
@@ -52,7 +52,7 @@ func Run(ctx context.Context, configFlag string) error {
 		return err
 	}
 	if err := app.Handle(vaultapi.DaemonStatus, rpcHandler(func(context.Context, vault.Empty) (vaultapi.DaemonStatusResponse, error) {
-		return vaultapi.DaemonStatusResponse{ConfigPath: path}, nil
+		return vaultapi.DaemonStatusResponse{ConfigPath: path, ConfigOptional: !explicit}, nil
 	})); err != nil {
 		return err
 	}
@@ -69,11 +69,7 @@ func Run(ctx context.Context, configFlag string) error {
 		return err
 	}
 	if err := app.Handle(vaultapi.Reload, rpcHandler(func(ctx context.Context, _ vault.Empty) (vault.Empty, error) {
-		file, err := config.Load(path, true)
-		if err != nil {
-			return vault.Empty{}, err
-		}
-		return vault.Empty{}, service.ApplyConfig(ctx, file)
+		return vault.Empty{}, service.ReloadConfig(ctx, path)
 	})); err != nil {
 		return err
 	}

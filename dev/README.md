@@ -85,3 +85,23 @@ Snapshot은 `dist/`에만 생성되며 GitHub에 게시하지 않는다. Native 
 정식 게시 진입점은 `mise run release`다. 깨끗한 작업 트리의 `vX.Y.Z` 태그에서 `GITHUB_TOKEN`을 제공하면 게시한다. `vX.Y.Z-rc.1` 같은 태그는 prerelease로 분류한다. `.github/workflows/release.yml`은 `v*` 태그 push에서만 실행되며 macOS runner에 mise 도구를 설치하고 동일한 task를 호출한다. Workflow에 별도 빌드 명령은 없다. 일반 PR/push CI는 추가하지 않는다. Release task는 단위 테스트와 GoReleaser 설정 검사를 먼저 실행한다. Docker·OS keychain을 사용하는 full integration은 기존 로컬 pre-commit에서 계속 실행한다.
 
 TUI 테스트는 `dev/integration/tui.py`에서 실제 controlling PTY와 pyte 화면 해석기를 사용한다. 의존성을 갱신하려면 `.dev/venv/bin/python -m pip install -r dev/integration/requirements.txt`를 실행한다. Snapshot integration마다 검색 tree·상세 표시/숨김·resize·외부 lock·unlock 복귀·Profiles 전환·설정 기반 최초 로그인·reload/logout/재로그인을 검증한다. Master password의 terminal echo 여부도 검사한다. Tree filter·layout 순수성·늦은 응답 폐기는 단위 테스트, background 조회/activity의 idle 경계는 synctest로 검증한다.
+
+## 로컬 go-daemonkit 검증
+
+go-daemonkit `8f5523de9203`은 `go.mod`와 `go.sum`으로 고정되어 있으며 일반 빌드에 workspace는 필요하지 않다.
+로컬 프레임워크 변경을 함께 검증할 때만 인접 checkout을 준비하고 bwb 루트에서 workspace를 만든다.
+`go.work`와 `go.work.sum`은 커밋하지 않는다.
+
+```sh
+go work init . ../go-daemonkit
+go test ./...
+mise run integration
+```
+
+이미 workspace가 있으면 `go work use ../go-daemonkit`을 사용한다.
+의존성을 변경할 때는 `GOWORK=off go test ./...`로 workspace 없이도 검증하고
+`go mod tidy`로 `go.sum`을 갱신한다.
+
+launch 환경은 기존처럼 상속하되 `BWB_CONFIG`를 자식 환경에서만 교체한다.
+환경 원문을 journal에 저장하지 않으며 다른 launcher의 crash recovery까지 복원하지 않는다.
+reload는 파일 읽기부터 정책 publication까지 직렬화하고, 오류·commit 전 취소에는 기존 정책을 유지한다.

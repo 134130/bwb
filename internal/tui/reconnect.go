@@ -30,3 +30,24 @@ func (r *Root) reconnect() tea.Cmd {
 		return &connected{client: client, stopCleanup: context.AfterFunc(lifetime, func() { client.Close() })}, nil
 	})
 }
+
+// Connection identity survives UI epochs but never follows a replacement client.
+type disconnected struct {
+	client *kit.Client
+	err    error
+}
+
+func (r *Root) watchConnection() tea.Cmd {
+	client, ctx := r.client, r.ctx
+	if client == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-client.Done():
+			return disconnected{client, client.Err()}
+		}
+	}
+}

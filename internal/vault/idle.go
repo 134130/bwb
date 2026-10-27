@@ -20,6 +20,24 @@ func (s *Service) Startup(ctx context.Context) error {
 func (s *Service) ApplyConfig(ctx context.Context, file *config.File) error {
 	s.configMu.Lock()
 	defer s.configMu.Unlock()
+	return s.applyConfig(ctx, file)
+}
+
+// ReloadConfig serializes reading and publication so an older read cannot win.
+func (s *Service) ReloadConfig(ctx context.Context, path string) error {
+	s.configMu.Lock()
+	defer s.configMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	file, err := config.Load(path, true)
+	if err != nil {
+		return err
+	}
+	return s.applyConfig(ctx, file)
+}
+
+func (s *Service) applyConfig(ctx context.Context, file *config.File) error {
 	next := map[string]config.Profile{}
 	if file != nil {
 		for name, policy := range file.Profiles {

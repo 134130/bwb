@@ -67,3 +67,19 @@ func TestReconnectCancellationRejectsLateResult(t *testing.T) {
 		}
 	})
 }
+
+func TestDisconnectTracksClientNotUIEpoch(t *testing.T) {
+	current, old := &kit.Client{}, &kit.Client{}
+	r := &Root{client: current, explorer: newExplorer(), epoch: 7, state: vaultapi.StatusResponse{State: "unlocked"}}
+	r.explorer.Detail.Value = "secret"
+	r.Update(disconnected{old, errors.New("closed")})
+	if r.explorer.Detail.Value != "secret" {
+		t.Fatal("old connection purged current state")
+	}
+	// Avoid Close on a synthetic client; nil is sufficient to exercise identity handling.
+	r.client = nil
+	r.Update(disconnected{nil, errors.New("closed")})
+	if r.state.State != "disconnected" || r.explorer.Detail.Value != "" {
+		t.Fatal("disconnect did not purge")
+	}
+}

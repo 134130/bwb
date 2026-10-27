@@ -3,6 +3,8 @@ package vault
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -348,4 +350,47 @@ func TestBackgroundListDoesNotRenewIdleButActivityDoes(t *testing.T) {
 			t.Fatal("background kept session alive")
 		}
 	})
+}
+
+func TestReloadCancellationBeforeReading(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing.toml")
+	synctest.Test(t, func(t *testing.T) {
+		s := &Service{}
+		s.configMu.Lock()
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		started := make(chan struct{})
+		go func() { close(started); done <- s.ReloadConfig(ctx, path) }()
+		<-started
+		cancel()
+		s.configMu.Unlock()
+		if err := <-done; !errors.Is(err, context.Canceled) {
+			t.Fatalf("read despite cancellation: %v", err)
+		}
+	})
+}
+
+func TestReloadInvalidFileKeepsAppliedConfig(t *testing.T) {
+	s, _ := persistentService(t)
+	defer func() {
+		if err := s.Shutdown(context.Background()); err != nil {
+			t.Error(err)
+		}
+	}()
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("version = 1\n[profiles.default]\nserver = 'https://example.invalid'\nemail = 'test@example.invalid'\nlock_timeout = '15m'\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ReloadConfig(t.Context(), path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("invalid TOML"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ReloadConfig(t.Context(), path); err == nil {
+		t.Fatal("accepted invalid config")
+	}
+	if s.policies["default"].LockTimeout != "15m0s" {
+		t.Fatal("lost applied policy")
+	}
 }

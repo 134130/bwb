@@ -1,10 +1,12 @@
 package daemon
 
 import (
-	"context"
+	"github.com/134130/bwb/internal/config"
+	"github.com/134130/bwb/internal/vaultapi"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
-	"testing/synctest"
-	"time"
 )
 
 func TestUpgradeVersionPolicy(t *testing.T) {
@@ -23,38 +25,64 @@ func TestUpgradeVersionPolicy(t *testing.T) {
 		}
 	}
 }
-func TestUpgradeLockSerializesAndCancels(t *testing.T) {
-	dir := t.TempDir()
-	synctest.Test(t, func(t *testing.T) {
-		release, err := lockUpgrade(t.Context(), dir)
-		if err != nil {
-			t.Fatal(err)
-		}
-		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-		defer cancel()
-		done := make(chan error, 1)
-		go func() {
-			unlock, err := lockUpgrade(ctx, dir)
-			if err == nil {
-				unlock()
+
+func TestLaunchEnvironmentPreservesParent(t *testing.T) {
+	t.Setenv("BWB_CONFIG", "/caller/config.toml")
+	t.Setenv("HTTPS_PROXY", "http://proxy.invalid")
+	for _, path := range []string{"", "/active/config.toml"} {
+		env := launchEnvironment(path)
+		count := 0
+		proxy := false
+		for _, entry := range env {
+			if strings.HasPrefix(entry, "BWB_CONFIG=") {
+				count++
+				if entry != "BWB_CONFIG="+path {
+					t.Fatal(entry)
+				}
 			}
-			done <- err
-		}()
-		synctest.Wait()
-		select {
-		case <-done:
-			t.Fatal("lock did not serialize")
-		default:
+			if entry == "HTTPS_PROXY=http://proxy.invalid" {
+				proxy = true
+			}
 		}
-		time.Sleep(time.Second)
-		if err := <-done; err != context.DeadlineExceeded {
-			t.Fatal(err)
+		if (path == "" && count != 0) || (path != "" && count != 1) || !proxy {
+			t.Fatal(env)
 		}
-		release()
-		unlock, err := lockUpgrade(t.Context(), dir)
-		if err != nil {
-			t.Fatal(err)
+		if os.Getenv("BWB_CONFIG") != "/caller/config.toml" {
+			t.Fatal("parent environment changed")
 		}
-		unlock()
-	})
+	}
+}
+
+func TestUpgradePreservesOptionalConfig(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("BWB_CONFIG", "/caller/other.toml")
+	path, err := config.DefaultPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := vaultapi.DaemonStatusResponse{ConfigPath: path, ConfigOptional: true}
+	for _, exists := range []bool{false, true} {
+		if exists {
+			if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte("version = 1\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		got, err := upgradeConfigPath(status)
+		if err != nil || got != "" {
+			t.Fatalf("optional config became required: %q %v", got, err)
+		}
+	}
+	status.ConfigOptional = false
+	if got, err := upgradeConfigPath(status); err != nil || got != path {
+		t.Fatalf("explicit path lost: %q %v", got, err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := upgradeConfigPath(status); err == nil {
+		t.Fatal("missing explicit config accepted")
+	}
 }

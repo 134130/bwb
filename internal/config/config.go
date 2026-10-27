@@ -61,21 +61,30 @@ func Path(flag string) (string, bool, error) {
 	}
 	explicit := path != ""
 	if !explicit {
-		base := os.Getenv("XDG_CONFIG_HOME")
-		if base == "" {
-			home, err := os.UserHomeDir()
-			if err != nil {
-				return "", false, err
-			}
-			base = filepath.Join(home, ".config")
+		var err error
+		path, err = DefaultPath()
+		if err != nil {
+			return "", false, err
 		}
-		if !filepath.IsAbs(base) {
-			return "", false, errors.New("XDG_CONFIG_HOME must be absolute")
-		}
-		path = filepath.Join(base, "bwb", "config.toml")
 	}
 	absolute, err := filepath.Abs(path)
 	return absolute, explicit, err
+}
+
+// DefaultPath ignores BWB_CONFIG and returns the optional default location.
+func DefaultPath() (string, error) {
+	base := os.Getenv("XDG_CONFIG_HOME")
+	if base == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		base = filepath.Join(home, ".config")
+	}
+	if !filepath.IsAbs(base) {
+		return "", errors.New("XDG_CONFIG_HOME must be absolute")
+	}
+	return filepath.Join(base, "bwb", "config.toml"), nil
 }
 
 func Load(path string, explicit bool) (*File, error) {

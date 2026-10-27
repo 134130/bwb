@@ -64,30 +64,11 @@ func prepareConfig(cmd *cobra.Command, pathFlag string, profile *string, changed
 	return nil
 }
 
-// daemonkit inherits the launcher environment but persists its original argv.
-// Serialize the temporary environment override used only when spawning a daemon.
-var launchConfigMu sync.Mutex
-
 func connectCommand(cmd *cobra.Command) (*kit.Client, error) { return connectContext(cmd.Context()) }
 
 func connectContext(ctx context.Context) (*kit.Client, error) {
-	launchConfigMu.Lock()
-	defer launchConfigMu.Unlock()
 	state, _ := ctx.Value(configKey{}).(commandConfig)
-	if state.startupPath != "" {
-		previous, existed := os.LookupEnv("BWB_CONFIG")
-		if err := os.Setenv("BWB_CONFIG", state.startupPath); err != nil {
-			return nil, err
-		}
-		defer func() {
-			if existed {
-				_ = os.Setenv("BWB_CONFIG", previous)
-			} else {
-				_ = os.Unsetenv("BWB_CONFIG")
-			}
-		}()
-	}
-	return daemon.Connect(ctx, state.interactive, state.notice)
+	return daemon.Connect(ctx, state.startupPath, state.interactive, state.notice)
 }
 
 func configCommands() (*cobra.Command, *cobra.Command) {

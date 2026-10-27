@@ -1,3 +1,5 @@
 .dev/
 __pycache__/
 dist/
+go.work
+go.work.sum

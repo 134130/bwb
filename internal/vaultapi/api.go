@@ -30,7 +30,8 @@ type ProfilesResponse = vault.ProfilesResponse
 type StatusResponse = vault.StatusResponse
 
 type DaemonStatusResponse struct {
-	ConfigPath string `json:"configPath"`
+	ConfigOptional bool   `json:"configOptional"`
+	ConfigPath     string `json:"configPath"`
 }
 
 const (
