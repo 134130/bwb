@@ -15,6 +15,8 @@ import (
 )
 
 type profile struct {
+	reprompts                  map[string]*repromptGrant
+	repromptMu                 sync.Mutex
 	idleTimeout                time.Duration
 	idleTimer                  *time.Timer
 	idleVersion                uint64
@@ -238,7 +240,7 @@ func (s *Service) login(ctx context.Context, req LoginRequest, apiKey *bitwarden
 	if p.session != nil {
 		p.session.Close()
 	}
-	p.clearCatalog()
+	p.clearSnapshotState()
 	p.session, p.snapshot, p.credential = session, snapshot, saved.Credential
 	s.activateIdle(p, s.policies[req.Profile])
 	p.authVersion++
@@ -260,7 +262,14 @@ func (s *Service) Read(ctx context.Context, req ReadRequest) (ReadResponse, erro
 	if p.session == nil {
 		return ReadResponse{}, s.authRequired(ctx, p, req.Profile, "unlock")
 	}
-	value, err := p.session.Read(p.snapshot, req.ID, req.Field)
+	snapshot := p.snapshot
+	if req.Field != "name" {
+		snapshot, err = s.itemSnapshot(ctx, p, req.Profile, req.ID, req.RepromptToken)
+		if err != nil {
+			return ReadResponse{}, err
+		}
+	}
+	value, err := p.session.Read(snapshot, req.ID, req.Field)
 	if err != nil {
 		return ReadResponse{}, err
 	}
@@ -351,7 +360,7 @@ func (s *Service) Sync(ctx context.Context, req ProfileRequest) (Empty, error) {
 	if err := ctx.Err(); err != nil {
 		return Empty{}, err
 	}
-	p.clearCatalog()
+	p.clearSnapshotState()
 	p.snapshot = snapshot
 	return Empty{}, nil
 }
@@ -397,7 +406,7 @@ func (s *Service) Unlock(ctx context.Context, req UnlockRequest) (Empty, error) 
 	if p.session != nil {
 		p.session.Close()
 	}
-	p.clearCatalog()
+	p.clearSnapshotState()
 	p.session, p.snapshot, p.credential = session, snapshot, saved.Credential
 	s.activateIdle(p, s.policies[req.Profile])
 	p.authVersion++
@@ -431,6 +440,7 @@ func (s *Service) Status(ctx context.Context, req ProfileRequest) (StatusRespons
 	result := StatusResponse{State: state, LockTimeout: "0s"}
 	if policy, ok := s.policies[req.Profile]; ok {
 		result.Server, result.Email, result.LockTimeout = policy.Server, policy.Email, policy.LockTimeout
+		result.InsecureSkipReprompt = policy.InsecureSkipReprompt
 	} else if saved.Cache != nil {
 		result.Server, result.Email = saved.Cache.Server, saved.Cache.Email
 	}

@@ -14,19 +14,16 @@ type AuthPrompt struct{ Action, Profile, Server, Email, Label string }
 type PasswordPrompt func(context.Context, AuthPrompt) ([]byte, error)
 
 type Executor struct {
-	Client *kit.Client
-	Prompt PasswordPrompt
+	Reprompt *RepromptSession
+	Client   *kit.Client
+	Prompt   PasswordPrompt
 }
 
 func (e Executor) Item(ctx context.Context, req vaultapi.ItemRequest) (vaultapi.ItemResponse, error) {
-	return execute(ctx, func() (vaultapi.ItemResponse, error) { return e.Client.Invoke(ctx, vaultapi.Item, req) },
-		func(err error) error { return e.authenticate(ctx, req.Profile, err) })
+	return withReprompt(e, ctx, req.Profile, &req.RepromptToken, func() (vaultapi.ItemResponse, error) { return e.Client.Invoke(ctx, vaultapi.Item, req) })
 }
-
-// Read, List and Sync opt into authentication recovery. Output happens after this returns.
 func (e Executor) Read(ctx context.Context, req vaultapi.ReadRequest) (vaultapi.ReadResponse, error) {
-	return execute(ctx, func() (vaultapi.ReadResponse, error) { return e.Client.Invoke(ctx, vaultapi.Read, req) },
-		func(err error) error { return e.authenticate(ctx, req.Profile, err) })
+	return withReprompt(e, ctx, req.Profile, &req.RepromptToken, func() (vaultapi.ReadResponse, error) { return e.Client.Invoke(ctx, vaultapi.Read, req) })
 }
 func (e Executor) Sync(ctx context.Context, req vaultapi.ProfileRequest) (vaultapi.Empty, error) {
 	return execute(ctx, func() (vaultapi.Empty, error) { return e.Client.Invoke(ctx, vaultapi.Sync, req) },
@@ -143,9 +140,8 @@ func (e Executor) List(ctx context.Context, req vaultapi.ListRequest) ([]vaultap
 }
 
 func (e Executor) Describe(ctx context.Context, req vaultapi.DescribeRequest) (vaultapi.DescribeResponse, error) {
-	return execute(ctx, func() (vaultapi.DescribeResponse, error) { return e.Client.Invoke(ctx, vaultapi.Describe, req) }, func(err error) error { return e.authenticate(ctx, req.Profile, err) })
+	return withReprompt(e, ctx, req.Profile, &req.RepromptToken, func() (vaultapi.DescribeResponse, error) { return e.Client.Invoke(ctx, vaultapi.Describe, req) })
 }
-
 func (e Executor) TOTP(ctx context.Context, req vaultapi.TOTPRequest) (vaultapi.TOTPResponse, error) {
-	return execute(ctx, func() (vaultapi.TOTPResponse, error) { return e.Client.Invoke(ctx, vaultapi.TOTP, req) }, func(err error) error { return e.authenticate(ctx, req.Profile, err) })
+	return withReprompt(e, ctx, req.Profile, &req.RepromptToken, func() (vaultapi.TOTPResponse, error) { return e.Client.Invoke(ctx, vaultapi.TOTP, req) })
 }

@@ -56,6 +56,12 @@ func Run(ctx context.Context, configFlag string) error {
 	})); err != nil {
 		return err
 	}
+	if err := app.Handle(vaultapi.Reprompt, rpcHandler(service.Reprompt)); err != nil {
+		return err
+	}
+	if err := app.Handle(vaultapi.WatchReprompt, rpcHandler(service.WatchReprompt)); err != nil {
+		return err
+	}
 	if err := app.Handle(vaultapi.TOTP, rpcHandler(service.TOTP)); err != nil {
 		return err
 	}

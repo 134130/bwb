@@ -127,6 +127,8 @@ func (r *Root) loadCatalog(sync bool) tea.Cmd {
 	profile, executor := r.profile, r.executor
 	kind := "catalog"
 	if sync {
+		r.resetReprompt()
+		executor = r.executor
 		kind = "sync"
 		r.explorer.Detail.clearValue()
 	}
@@ -199,7 +201,13 @@ func (r *Root) poll() tea.Cmd {
 		return statusMsg{epoch, status, err}
 	}
 }
+func (r *Root) resetReprompt() {
+	r.executor.Reprompt.Close()
+	r.executor.Reprompt = vaultclient.NewRepromptSession(r.ctx)
+}
 func (r *Root) purge() {
+	r.executor.Reprompt.Close()
+	r.executor.Reprompt = nil
 	if r.cancel != nil {
 		r.cancel()
 		r.cancel = nil
@@ -230,6 +238,7 @@ func (r *Root) purge() {
 	r.profiles = ProfilesPage{Light: r.light}
 }
 func (r *Root) describe() tea.Cmd {
+	r.resetReprompt()
 	n := r.explorer.Tree.current()
 	r.explorer.Detail = Detail{Node: n, Light: r.light}
 	if n == nil || n.Item == nil {
@@ -241,6 +250,7 @@ func (r *Root) describe() tea.Cmd {
 		return nil
 	}
 	profile, id, executor := r.profile, n.Item.ID, r.executor
+	executor.Prompt = nil // Browsing never opens a reprompt dialog. Enter or reveal does.
 	return r.operation("describe", func(ctx context.Context) (any, error) {
 		return executor.Item(ctx, vaultapi.ItemRequest{Profile: profile, Item: id})
 	})
@@ -331,7 +341,18 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return r, nil
 		}
 		old := r.state.State
+		oldSkip := r.state.InsecureSkipReprompt
 		r.state = m.Status
+		if old == "unlocked" && m.Status.State == "unlocked" && oldSkip != m.Status.InsecureSkipReprompt {
+			r.resetReprompt()
+			if r.otp != nil {
+				r.otp.Code = vaultapi.TOTPResponse{}
+				r.otp.Stopped = true
+			}
+			if r.page == "explorer" && r.otp == nil {
+				return r, r.describe()
+			}
+		}
 		if old == "unlocked" && m.Status.State != "unlocked" {
 			r.purge()
 			r.message = "Vault locked · Enter to unlock"
@@ -393,6 +414,10 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.Kind == "describe" || m.Kind == "reveal" {
 				r.explorer.Detail.Error = r.message
+				r.explorer.Detail.Reprompt = r.explorer.Detail.Reprompt || vaultclient.RepromptFailure(m.Err)
+				if vaultclient.RepromptFailure(m.Err) {
+					r.explorer.Detail.Error = "Master password required · Enter to verify"
+				}
 			}
 			return r, nil
 		}
@@ -510,6 +535,17 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if r.auth != nil {
 			if key == "esc" {
+				if r.auth.Prompt.Request.Action == "reprompt" {
+					if r.cancel != nil {
+						r.cancel()
+					}
+					r.epoch++
+					r.busy = false
+					r.auth.Input.SetValue("")
+					r.auth = nil
+					r.message = "Verification canceled"
+					return r, nil
+				}
 				r.purge()
 				r.message = "Authentication canceled"
 				return r, nil
@@ -588,6 +624,7 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					r.busy = false
 				}
 				r.explorer.Detail.clearValue()
+				r.resetReprompt()
 				r.help = !r.help
 				return r, nil
 			}
@@ -602,6 +639,7 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return r, nil
 		}
 		if key == "ctrl+p" {
+			r.resetReprompt()
 			r.explorer.Detail.clearValue()
 			r.confirmLogout = ""
 			if r.page == "profiles" {
@@ -643,6 +681,15 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return r, nil
 		}
+		if key == "enter" && r.explorer.Focus != "search" && r.explorer.Detail.Reprompt && !r.busy {
+			n := r.explorer.Tree.current()
+			if n != nil && n.Item != nil {
+				profile, id := r.profile, n.Item.ID
+				return r, r.operation("describe", func(ctx context.Context) (any, error) {
+					return executor.Item(ctx, vaultapi.ItemRequest{Profile: profile, Item: id})
+				})
+			}
+		}
 		if key == "v" && r.explorer.Focus != "search" {
 			if r.explorer.Detail.Revealed || r.busy && r.workKind == "reveal" {
 				r.hideItem()
@@ -675,6 +722,7 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			r.busy = false
 		}
 		if oldFocus != "search" && r.explorer.Focus == "search" {
+			r.resetReprompt()
 			r.hideItem()
 		}
 		return r, tea.Batch(cmd, r.activity())
@@ -744,7 +792,12 @@ func (r *Root) View() tea.View {
 	if r.auth != nil {
 		p := r.auth.Prompt.Request
 		content := fmt.Sprintf("%s %s\n%s at %s\n\n%s\n\nEnter submit · Esc cancel", safe(p.Action), safe(p.Profile), safe(p.Email), safe(p.Server), r.auth.Input.View(Size{max(0, min(72, size.Width)-4), 1}))
-		body = dialog("Authentication", content, body, size, r.light)
+		title := "Authentication"
+		if p.Action == "reprompt" {
+			title = "Verify master password"
+			content = "Confirm access to this item\n\n" + r.auth.Input.View(Size{max(0, min(72, size.Width)-4), 1}) + "\n\nEnter submit · Esc cancel"
+		}
+		body = dialog(title, content, body, size, r.light)
 		hints = "Enter submit · Esc cancel"
 	}
 	view := tea.NewView(box(title+"\n\n"+box(body, size)+"\n"+subdued(safe(status), r.light)+"\n"+safe(hints), r.size))

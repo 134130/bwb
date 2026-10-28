@@ -15,7 +15,7 @@ import (
 
 var ErrNotFound = errors.New("item or field not found")
 
-var ErrReprompt = errors.New("item requires master password reprompt; open it in the Bitwarden app")
+var ErrReprompt = errors.New("item requires master password reprompt")
 
 var payloadNames = map[int]string{1: "login", 2: "secureNote", 3: "card", 4: "identity", 5: "sshKey", 6: "bankAccount", 7: "driversLicense", 8: "passport"}
 
@@ -272,7 +272,7 @@ func decryptItem(raw []byte, userKey []byte) (Item, error) {
 		return Item{}, err
 	}
 	if item.Reprompt == 1 {
-		// shortcut: expose only names until per-item master password verification is implemented.
+		// Unverified snapshots expose only names; authorization uses a request-local copy.
 		item.Notes, item.Fields, item.Data = nil, nil, nil
 		return item, nil
 	}

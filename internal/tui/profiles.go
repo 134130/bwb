@@ -111,9 +111,11 @@ func (p *ProfilesPage) detailLines(size Size) []string {
 	if row := p.current(); row != nil {
 		d := row.Status
 		detail = fmt.Sprintf("%s\nState: %s\nServer: %s\nEmail: %s\nApplied timeout: %s\nLock at: %s\n\nConfig: %s", safe(row.Name), safe(d.State), safe(d.Server), safe(d.Email), safe(d.LockTimeout), safe(d.LockAt), safe(p.Path))
+		detail += fmt.Sprintf("\nApplied insecure_skip_reprompt: %t", d.InsecureSkipReprompt)
 		if row.File != nil {
+			detail += fmt.Sprintf("\nFile insecure_skip_reprompt: %t", row.File.InsecureSkipReprompt)
 			detail += fmt.Sprintf("\nFile timeout: %s", safe(row.File.LockTimeout))
-			if row.File.Server != d.Server || row.File.Email != d.Email || row.File.LockTimeout != d.LockTimeout {
+			if row.File.Server != d.Server || row.File.Email != d.Email || row.File.LockTimeout != d.LockTimeout || row.File.InsecureSkipReprompt != d.InsecureSkipReprompt {
 				detail += "\nFile differs · reload required"
 			}
 		}

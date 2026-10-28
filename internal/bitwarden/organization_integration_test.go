@@ -33,6 +33,7 @@ type organizationManifest struct {
 func TestOrganizationSnapshot(t *testing.T) {
 	var manifest struct {
 		Email, Password string
+		Items           map[string]string
 		Organizations   organizationManifest
 	}
 	loadJSON(t, "../../testdata/integration/manifest.json", &manifest)
@@ -165,7 +166,7 @@ func TestOrganizationSnapshot(t *testing.T) {
 			if err != nil {
 				t.Fatal("legacy personal cache rejected", err)
 			}
-			if len(oldSnapshot.items) != 13 {
+			if len(oldSnapshot.items) != len(manifest.Items) {
 				t.Fatal("legacy personal items lost")
 			}
 			oldSession.Close()

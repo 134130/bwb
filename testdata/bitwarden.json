@@ -310,6 +310,52 @@
         "issueDate": "2020-01-01",
         "expirationDate": "2030-01-01"
       }
+    },
+    {
+      "id": "20000000-0000-4000-8000-000000000014",
+      "organizationId": null,
+      "folderId": "10000000-0000-4000-8000-000000000001",
+      "type": 1,
+      "reprompt": 1,
+      "name": "Protected login (reprompt)",
+      "notes": "DEMO reprompt notes",
+      "favorite": true,
+      "fields": [],
+      "collectionIds": [],
+      "login": {
+        "username": "developer@example.invalid",
+        "password": "DEMO-reprompt-password!",
+        "totp": "JBSWY3DPEHPK3PXP",
+        "uris": [
+          {
+            "match": null,
+            "uri": "https://github.example.invalid"
+          }
+        ]
+      }
+    },
+    {
+      "id": "20000000-0000-4000-8000-000000000015",
+      "organizationId": null,
+      "folderId": "10000000-0000-4000-8000-000000000001",
+      "type": 1,
+      "reprompt": 1,
+      "name": "Second protected login (reprompt)",
+      "notes": "DEMO reprompt notes",
+      "favorite": true,
+      "fields": [],
+      "collectionIds": [],
+      "login": {
+        "username": "developer@example.invalid",
+        "password": "DEMO-reprompt-password!",
+        "totp": "JBSWY3DPEHPK3PXP",
+        "uris": [
+          {
+            "match": null,
+            "uri": "https://github.example.invalid"
+          }
+        ]
+      }
     }
   ]
 }

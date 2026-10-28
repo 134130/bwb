@@ -13,6 +13,7 @@ default_profile = "personal"
 server = "https://vault.bitwarden.com/"
 email = "USER@example.com"
 lock_timeout = "15m"
+insecure_skip_reprompt = true
 [profiles.work]
 server = "http://localhost:8222"
 email = "work@example.com"
@@ -29,6 +30,9 @@ func TestConfigValidationAndSelection(t *testing.T) {
 	}
 	if file.Profiles["personal"].Email != "user@example.com" || file.Profiles["personal"].Server != "https://vault.bitwarden.com" || file.Profiles["personal"].LockTimeout != "15m0s" || file.Profiles["work"].LockTimeout != "0s" {
 		t.Fatal("config normalization failed")
+	}
+	if !file.Profiles["personal"].InsecureSkipReprompt || file.Profiles["work"].InsecureSkipReprompt {
+		t.Fatal("reprompt policy defaults")
 	}
 	t.Setenv("BWB_PROFILE", "")
 	if name, err := Select("default", false, file); err != nil || name != "personal" {
@@ -48,6 +52,7 @@ func TestConfigValidationAndSelection(t *testing.T) {
 		t.Fatal("legacy profile rejected", err)
 	}
 	for _, bad := range []string{
+		strings.Replace(sample, "insecure_skip_reprompt = true", `insecure_skip_reprompt = "true"`, 1),
 		strings.Replace(sample, `email = "USER@example.com"`, `email = ""`, 1),
 		strings.Replace(sample, `email = "USER@example.com"`, `email = " "`, 1),
 		strings.Replace(sample, "version = 1", "version = 2", 1),

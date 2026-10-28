@@ -23,18 +23,20 @@ type UnlockRequest struct {
 }
 
 type ReadRequest struct {
-	Profile string `json:"profile"`
-	ID      string `json:"id"`
-	Field   string `json:"field"`
+	RepromptToken string `json:"repromptToken,omitempty"`
+	Profile       string `json:"profile"`
+	ID            string `json:"id"`
+	Field         string `json:"field"`
 }
 type Empty struct{}
 type ReadResponse struct {
 	Value string `json:"value"`
 }
 type StatusResponse struct {
-	Server      string `json:"server,omitempty"`
-	Email       string `json:"email,omitempty"`
-	LockTimeout string `json:"lockTimeout"`
-	LockAt      string `json:"lockAt,omitempty"`
-	State       string `json:"state"`
+	InsecureSkipReprompt bool   `json:"insecureSkipReprompt"`
+	Server               string `json:"server,omitempty"`
+	Email                string `json:"email,omitempty"`
+	LockTimeout          string `json:"lockTimeout"`
+	LockAt               string `json:"lockAt,omitempty"`
+	State                string `json:"state"`
 }

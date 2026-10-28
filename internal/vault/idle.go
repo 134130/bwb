@@ -83,6 +83,7 @@ func (s *Service) applyConfig(ctx context.Context, file *config.File) error {
 	}
 	s.policies = next
 	for name, p := range s.profiles {
+		p.clearReprompt()
 		p.idleTimeout = 0
 		if policy, ok := next[name]; ok {
 			p.idleTimeout, _ = time.ParseDuration(policy.LockTimeout)
@@ -136,7 +137,7 @@ func clearMemory(p *profile) {
 	if p.session != nil {
 		p.session.Close()
 	}
-	p.clearCatalog()
+	p.clearSnapshotState()
 	p.session, p.snapshot, p.credential = nil, nil, ""
 }
 

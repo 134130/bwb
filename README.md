@@ -46,8 +46,7 @@ macOS / Linux; native credential store required. Password and personal API Key
 login with PBKDF2 accounts. Tested against Vaultwarden snapshots; official
 Bitwarden server interoperability remains unverified.
 
-Not yet supported: Argon2id, SSO/2FA login, Key Connector, or reprompt-protected
-field access. Unofficial client; not affiliated with Bitwarden.
+Not yet supported: Argon2id, SSO/2FA login, or Key Connector. Unofficial client; not affiliated with Bitwarden.
 
 ## Development
 

@@ -11,8 +11,9 @@ import (
 )
 
 type DescribeRequest struct {
-	Profile string `json:"profile"`
-	ID      string `json:"id"`
+	RepromptToken string `json:"repromptToken,omitempty"`
+	Profile       string `json:"profile"`
+	ID            string `json:"id"`
 }
 type DescribeResponse struct {
 	Fields []bitwarden.FieldInfo `json:"fields"`
@@ -30,7 +31,11 @@ func (s *Service) Describe(ctx context.Context, req DescribeRequest) (DescribeRe
 	if p.session == nil {
 		return DescribeResponse{}, s.authRequired(ctx, p, req.Profile, "unlock")
 	}
-	fields, err := p.session.Describe(ctx, p.snapshot, req.ID)
+	snapshot, err := s.itemSnapshot(ctx, p, req.Profile, req.ID, req.RepromptToken)
+	if err != nil {
+		return DescribeResponse{}, err
+	}
+	fields, err := p.session.Describe(ctx, snapshot, req.ID)
 	if err != nil {
 		return DescribeResponse{}, err
 	}

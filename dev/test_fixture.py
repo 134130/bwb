@@ -11,7 +11,8 @@ class FixtureTest(unittest.TestCase):
         self.assertIs(data["encrypted"], False)
         folders, items = data["folders"], data["items"]
         self.assertEqual(len(folders), 2)
-        self.assertEqual(len(items), 13)
+        self.assertEqual(len(items), 15)
+        self.assertEqual(sum(x["reprompt"] == 1 for x in items), 2)
         ids = [x["id"] for x in folders + items]
         self.assertEqual(len(ids), len(set(ids)))
         for value in ids:

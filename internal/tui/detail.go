@@ -16,6 +16,7 @@ import (
 
 type copyFieldMsg struct{ ID, Field string }
 type Detail struct {
+	Reprompt                  bool
 	Node                      *Node
 	Fields                    []bitwarden.ItemField
 	Index, Offset, Scroll     int
@@ -54,6 +55,7 @@ func (d *Detail) setItem(item vaultapi.ItemResponse, reveal bool) {
 		oldKey = d.Fields[d.Index].Key
 	}
 	d.Fields = nil
+	d.Reprompt = false
 	d.Error = item.Restriction
 	d.Revealed = reveal && item.Restriction == ""
 	for _, f := range item.Fields {

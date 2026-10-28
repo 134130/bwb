@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/134130/bwb/internal/vaultapi"
+	kit "github.com/134130/go-daemonkit"
 	"github.com/google/uuid"
 	"io"
 	"net/http"
@@ -443,6 +444,36 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	tuiTerminal("cancel")
 	tuiTerminal("explorer")
 	must("", "", "lock")
+	tuiTerminal("reprompt")
+	protectedID := manifest.Items["20000000-0000-4000-8000-000000000014"]
+	// A grant is explicit and item-scoped; raw RPCs cannot skip the daemon policy.
+	t.Setenv("XDG_STATE_HOME", state)
+	rpcClient, err := kit.Connect(t.Context(), kit.Options{AppID: "bwb", InstanceID: instance, Version: version})
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant, err := rpcClient.Invoke(t.Context(), vaultapi.Reprompt, vaultapi.RepromptRequest{Profile: "default", Item: protectedID, Password: []byte(manifest.Password)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = rpcClient.Invoke(t.Context(), vaultapi.Item, vaultapi.ItemRequest{Profile: "default", Item: manifest.Items["20000000-0000-4000-8000-000000000015"], Field: "password", RepromptToken: grant.Token}); err == nil {
+		t.Fatal("reprompt crossed item")
+	}
+	if code, err := rpcClient.Invoke(t.Context(), vaultapi.TOTP, vaultapi.TOTPRequest{Profile: "default", ID: protectedID, RepromptToken: grant.Token}); err != nil || code.Code == "" {
+		t.Fatal("protected TOTP", err)
+	}
+	if _, err = rpcClient.Invoke(t.Context(), vaultapi.Sync, vaultapi.ProfileRequest{Profile: "default"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = rpcClient.Invoke(t.Context(), vaultapi.Item, vaultapi.ItemRequest{Profile: "default", Item: protectedID, Field: "password", RepromptToken: grant.Token}); err == nil {
+		t.Fatal("sync retained grant")
+	}
+	rpcClient.Close()
+	terminal("success", "DEMO-reprompt-password!", "item", "read", protectedID, "--field", "password")
+	terminal("wrong", "", "item", "read", protectedID, "--field", "password")
+	terminal("cancel", "", "item", "read", protectedID, "--field", "password")
+	terminal("no_prompt", "", "--non-interactive", "item", "read", protectedID, "--field", "password")
+	must("", "", "lock")
 	tuiTerminal("otp", "totp", otpID)
 	must("", "", "lock")
 	terminal("no_prompt", "", "--non-interactive", "item", "list")
@@ -557,6 +588,30 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	must("", verbose, "--profile", "timed", "status", "--verbose")
 	tuiTerminal("login", "--config", configPath, "--profile", "steady", "tui")
 
+	// Policy changes require reload, apply per profile, and do not implicitly reveal details.
+	skipConfig := configText + "insecure_skip_reprompt = true\n"
+	if err := os.WriteFile(configPath, []byte(skipConfig), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run("", "--profile", "steady", "item", "read", protectedID, "--field", "password"); err == nil {
+		t.Fatal("disk edit bypassed reprompt")
+	}
+	must("", "", "daemon", "reload")
+	must("", "DEMO-reprompt-password!", "--profile", "steady", "item", "read", protectedID, "--field", "password")
+	if output, err := run("", "--profile", "steady", "item", "read", protectedID); err != nil || strings.Contains(output, "DEMO-reprompt-password!") {
+		t.Fatal("skip revealed secrets", err)
+	}
+	if _, err := run("", "--profile", "default", "item", "read", protectedID, "--field", "password"); err == nil {
+		t.Fatal("skip crossed profile")
+	}
+	if err := os.WriteFile(configPath, []byte(configText), 0600); err != nil {
+		t.Fatal(err)
+	}
+	must("", "", "daemon", "reload")
+	if _, err := run("", "--profile", "steady", "item", "read", protectedID, "--field", "password"); err == nil {
+		t.Fatal("skip remained after reload")
+	}
+
 	waitLocked := func() {
 		t.Helper()
 		deadline := time.Now().Add(5 * time.Second)
@@ -628,6 +683,16 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	must("", "", "--config", configPath, "--profile", "steady", "logout")
 	if err := os.WriteFile(configPath, []byte(configText), 0600); err != nil {
 		t.Fatal(err)
+	}
+
+	restrictedConfig := configText + fmt.Sprintf("\n[profiles.restricted]\nserver = %q\nemail = %q\ninsecure_skip_reprompt = true\n", endpoint.URL, manifest.Organizations.RestrictedEmail)
+	if err := os.WriteFile(configPath, []byte(restrictedConfig), 0600); err != nil {
+		t.Fatal(err)
+	}
+	must("", "", "daemon", "reload")
+	must(manifest.Password+"\n", "", "--profile", "restricted", "login", "--password-stdin")
+	if output, err := run("", "--profile", "restricted", "item", "read", manifest.Organizations.Entries[0].Items[1].ID, "--field", "password"); err == nil || !strings.Contains(output, "organization policy") {
+		t.Fatal("skip bypassed organization permissions", err, output)
 	}
 
 }

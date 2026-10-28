@@ -13,11 +13,12 @@ import (
 )
 
 type ItemRequest struct {
-	Profile string `json:"profile"`
-	Item    string `json:"item"`
-	Field   string `json:"field,omitempty"`
-	Reveal  bool   `json:"reveal,omitempty"`
-	TOTP    bool   `json:"totp,omitempty"`
+	RepromptToken string `json:"repromptToken,omitempty"`
+	Profile       string `json:"profile"`
+	Item          string `json:"item"`
+	Field         string `json:"field,omitempty"`
+	Reveal        bool   `json:"reveal,omitempty"`
+	TOTP          bool   `json:"totp,omitempty"`
 }
 
 type ItemResponse struct {
@@ -88,9 +89,16 @@ func (s *Service) Item(ctx context.Context, req ItemRequest) (ItemResponse, erro
 	if err != nil {
 		return ItemResponse{}, err
 	}
+	snapshot := p.snapshot
+	if req.Field != "name" {
+		snapshot, err = s.itemSnapshot(ctx, p, req.Profile, entry.ID, req.RepromptToken)
+		if err != nil {
+			return ItemResponse{}, err
+		}
+	}
 	result := ItemResponse{Item: entry}
 	if req.TOTP {
-		seed, err := p.session.Read(p.snapshot, entry.ID, "login/totp")
+		seed, err := p.session.Read(snapshot, entry.ID, "login/totp")
 		if err != nil {
 			return ItemResponse{}, fmt.Errorf("read TOTP seed: %w", err)
 		}
@@ -100,7 +108,7 @@ func (s *Service) Item(ctx context.Context, req ItemRequest) (ItemResponse, erro
 		}
 		result.Fields = []bitwarden.ItemField{{Key: "totp", Label: "Authentication code", Sensitive: true, State: "visible", Value: &code}}
 	} else {
-		result.ItemDetails, err = p.session.Inspect(ctx, p.snapshot, entry.ID, req.Field, req.Reveal)
+		result.ItemDetails, err = p.session.Inspect(ctx, snapshot, entry.ID, req.Field, req.Reveal)
 		if err != nil {
 			return ItemResponse{}, err
 		}

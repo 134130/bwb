@@ -95,7 +95,7 @@ func TestSnapshotIntegration(t *testing.T) {
 		if err := json.Unmarshal(bytes, &decoded); err != nil {
 			t.Fatal(err)
 		}
-		for _, field := range []string{"type", "organizationId", "name", "notes", "favorite", "reprompt", "fields"} {
+		for _, field := range []string{"type", "organizationId", "name", "favorite", "reprompt"} {
 			assertSubset(t, expected[field], decoded[field], fixtureID+"/"+field)
 		}
 		var folderID any
@@ -103,7 +103,15 @@ func TestSnapshotIntegration(t *testing.T) {
 			folderID = manifest.Folders[expected["folderId"].(string)]
 		}
 		assertSubset(t, folderID, decoded["folderId"], fixtureID+"/folderId")
-		assertSubset(t, expected[payloadNames[item.Type]], decoded["data"], fixtureID+"/payload")
+		if item.Reprompt == 1 {
+			if item.Data != nil || item.Fields != nil || item.Notes != nil {
+				t.Fatal("reprompt exposed snapshot fields")
+			}
+		} else {
+			assertSubset(t, expected["notes"], decoded["notes"], fixtureID+"/notes")
+			assertSubset(t, expected["fields"], decoded["fields"], fixtureID+"/fields")
+			assertSubset(t, expected[payloadNames[item.Type]], decoded["data"], fixtureID+"/payload")
+		}
 	}
 	if len(types) != 8 {
 		t.Fatal("missing cipher type")
@@ -113,6 +121,22 @@ func TestSnapshotIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, item := range vault.Items {
+		if item.Reprompt == 1 {
+			if _, err := session.Describe(ctx, snapshot, item.ID); !errors.Is(err, ErrReprompt) {
+				t.Fatal("reprompt not enforced", err)
+			}
+			if err := session.VerifyPassword(ctx, []byte(manifest.Password)); err != nil {
+				t.Fatal(err)
+			}
+			authorized, err := snapshot.AllowReprompt(item.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if value, err := session.Read(authorized, item.ID, "login/password"); err != nil || value != "DEMO-reprompt-password!" {
+				t.Fatal("authorized read", err)
+			}
+			continue
+		}
 		fields, err := session.Describe(ctx, snapshot, item.ID)
 		if err != nil {
 			t.Fatal("describe", item.Type, err)

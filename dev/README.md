@@ -45,17 +45,18 @@ TUI를 종료해도 환경은 유지된다. Go daemon 코드를 수정했다면 
 ## 현재 검증 범위
 
 - Go 제품 코드의 실제 prelogin, 잘못된 비밀번호 거부, 로그인, 명시적 refresh와 401 후 자동 refresh, sync.
-- protected user key 복호화 후 8종·19개 항목의 필드를 평문 기대값과 비교.
+- protected user key 복호화 후 8종·21개 항목의 필드를 평문 기대값과 비교.
 - 조직 2개 × collection 2개, 다중 소속·동명 collection, folder 동시 소속, RSA 조직 키·item key, 읽기 전용/숨김 제한 계정, 실제 권한 회수 후 sync 반영.
 - 서버 UUID, folder 관계, enum/boolean/null/빈 값/Unicode/여러 줄 값 유지.
 - fixture/dump checksum 일치, SQL 무결성·foreign key 검사.
 - Go 제품 코드의 암호문 변조·잘못된 키·padding 오류 거부, 독립 Python KDF/cipher vector 대조, 기대 필드 누락/값 변경 감지.
-- 실제 목록 RPC/CLI의 19개 항목·조직·folder·collection 발견, AND 필터·검색·정렬·그룹 표시, 비밀 필드 비노출, 제한 profile 격리, 재시작 후 HTTP 없는 목록과 TTY 자동 unlock. Byte-budget pagination과 stale cursor 거부, 제어문자 escape, lock의 index 폐기는 단위 검사로 검증한다.
+- 실제 목록 RPC/CLI의 21개 항목·조직·folder·collection 발견, AND 필터·검색·정렬·그룹 표시, 비밀 필드 비노출, 제한 profile 격리, 재시작 후 HTTP 없는 목록과 TTY 자동 unlock. Byte-budget pagination과 stale cursor 거부, 제어문자 escape, lock의 index 폐기는 단위 검사로 검증한다.
 - 실제 바이너리의 daemon 자동 기동, 별도 CLI 프로세스의 비밀번호/빈 값/여러 줄 출력, offline read 시 HTTP 0회, 실패한 sync/재로그인 후 cache 유지.
 - `item read`의 ID/정확한 이름 선택, 동명 후보 오류, 기본 마스킹·명시적 reveal·JSON 상태·발견한 필드 추출, `item totp`의 코드/seed 분리, `--sync` 검색. 기존 루트 read와 타입 접두사 필드 경로 거부도 검증한다. TOTP 계산은 RFC 6238의 SHA1/SHA256/SHA512 vector로 교차 검증한다.
 - profile identity 변경 거부, 진행 중 login의 lock 취소, lock 후 조회 거부, 종료·재시작 후 오프라인 unlock과 HTTP 0회.
 - 실제 OS keychain에 저장한 refresh token으로 재시작 후 sync, 반복 재시작, logout 후 unlock 거부·다른 profile 유지.
 - cache version/KDF/계정/암호문 검증, native 쓰기 실패·취소·삭제 실패의 정리 목록 복구, SQLite chunk 원자 저장.
+- Reprompt 항목의 CLI/TUI 재확인, 잘못된 비밀번호·취소, 항목별 권한과 sync 폐기, `insecure_skip_reprompt`의 profile 격리·명시적 reload.
 - 실제 PTY에서 stdout pipe와 prompt 분리, echo 비활성/복원, 잘못된·긴 비밀번호, Ctrl-C/SIGINT, lock, 동시 CLI의 단일 prompt·취소 전파.
 - refresh 거부 후 자동 재로그인·sync 1회 재시도, 인증 만료 중 cached read 유지, 비대화형·네트워크 장애는 prompt하지 않음.
 - Config 기반 로그인·identity 변경 차단, profile별 자동 잠금과 0s 비활성화, 재시작 후 TOML timeout 재적용, 명시적 reload 전후 정책 분리·잘못된 reload의 기존 정책 유지·잘못된 TOML 중 lock/logout, 만료 후 TTY 자동 unlock을 실제 CLI로 검증한다. 시간·조회 연장·정책 단축·취소·shutdown 경합은 synctest로 검사한다.

@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/134130/bwb/internal/bitwarden"
 	"github.com/134130/bwb/internal/vaultapi"
+	"github.com/134130/bwb/internal/vaultclient"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -166,5 +167,25 @@ func TestNarrowProfilesCanInspectAndScrollConfiguration(t *testing.T) {
 	p.Update(tea.KeyPressMsg{Code: tea.KeyEscape}, size)
 	if p.DetailFocus || !strings.Contains(p.View(size), "Profiles") {
 		t.Fatal("cannot return to profiles")
+	}
+}
+
+func TestRepromptModalCancelKeepsItemAndRejectsLateResult(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	r := &Root{ctx: t.Context(), explorer: newExplorer(), size: Size{120, 34}, state: vaultapi.StatusResponse{State: "unlocked"}, cancel: cancel, busy: true, epoch: 4}
+	r.explorer.Tree.Roots = sampleTree()
+	r.explorer.Tree.rebuild("", Size{40, 20})
+	r.explorer.Tree.Index = 3
+	node := r.explorer.Tree.current()
+	r.explorer.Detail = Detail{Node: node, Reprompt: true}
+	r.auth = &authDialog{Input: newInput(true), Prompt: promptMsg{Context: ctx, Request: vaultclient.AuthPrompt{Action: "reprompt"}}}
+	r.auth.Input.SetValue("must-not-echo")
+	r.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	if r.auth != nil || r.busy || ctx.Err() == nil || r.explorer.Tree.current() != node {
+		t.Fatal("cancel lost navigation or kept prompt")
+	}
+	r.Update(resultMsg{Epoch: 4, Kind: "reveal", Value: testItem("late-secret")})
+	if secretValue(&r.explorer.Detail) != "" {
+		t.Fatal("canceled reveal restored data")
 	}
 }

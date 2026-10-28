@@ -19,9 +19,10 @@ import (
 )
 
 type Profile struct {
-	Server      string `toml:"server" json:"server"`
-	Email       string `toml:"email" json:"email"`
-	LockTimeout string `toml:"lock_timeout" json:"lockTimeout"`
+	InsecureSkipReprompt bool   `toml:"insecure_skip_reprompt" json:"insecureSkipReprompt"`
+	Server               string `toml:"server" json:"server"`
+	Email                string `toml:"email" json:"email"`
+	LockTimeout          string `toml:"lock_timeout" json:"lockTimeout"`
 }
 
 type File struct {

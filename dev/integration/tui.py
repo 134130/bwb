@@ -169,6 +169,45 @@ def main():
                     pause()
                 raise AssertionError('field not reachable: ' + name)
 
+            if scenario == 'reprompt':
+                send('/Protected login')
+                pause()
+                send('\r')
+                pause()
+                for _ in range(20):
+                    if any('>' in line[:40] and 'Protected login' in line[:40] for line in screen.display):
+                        break
+                    send('\x1b[B'); pause()
+                until(lambda: 'Enter to verify' in view())
+                send('\r')
+                until(lambda: 'Verify master password' in view())
+                send('wrong\r')
+                until(lambda: 'incorrect master password' in view())
+                send('\r')
+                until(lambda: 'Verify master password' in view())
+                send('\x1b')
+                until(lambda: 'Verification canceled' in view())
+                assert 'Protected login' in view(), 'cancel lost navigation'
+                send('\r')
+                until(lambda: 'Verify master password' in view())
+                send(password + '\r')
+                until(lambda: 'Username' in view() and 'Verify master password' not in view() and 'Working' not in view())
+                assert 'DEMO-reprompt-password!' not in view()
+                send('v')
+                until(lambda: 'DEMO-reprompt-password!' in view())
+                until(lambda: re.search(r'Authentication code +[0-9]{6}', view()) is not None)
+                send('v')
+                until(lambda: 'Secrets hidden' in view())
+                send('v')
+                until(lambda: 'DEMO-reprompt-password!' in view())
+                send('r')
+                until(lambda: 'Enter to verify' in view() and 'DEMO-reprompt-password!' not in view())
+                send('q')
+                until(lambda: status is not None)
+                assert status == 0 and password.encode() not in output
+                print('PASS: TUI reprompt modal, wrong password, cancel, reveal, TOTP and sync invalidation')
+                return
+
             find_item('OTP', 'OTP (public')
             until(lambda: 'Authentication code' in view())
             assert 'GEZDGNBV' not in view()

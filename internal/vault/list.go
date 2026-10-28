@@ -90,7 +90,7 @@ func ValidateList(req ListRequest) error {
 	return nil
 }
 
-func (p *profile) clearCatalog() { p.catalog = nil; p.catalogID = "" }
+func (p *profile) clearSnapshotState() { p.clearReprompt(); p.catalog = nil; p.catalogID = "" }
 
 func (s *Service) List(ctx context.Context, req ListRequest) (ListResponse, error) {
 	if err := ValidateList(req); err != nil {

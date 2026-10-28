@@ -8,6 +8,8 @@ server = "http://localhost:8222"
 email = "bwb-demo@example.invalid"
 # Zero means retain unlocked vault keys until explicit lock or daemon exit.
 lock_timeout = "0s"
+# Skip item password reconfirmation only; never bypass unlock or organization permissions.
+insecure_skip_reprompt = false
 
 [profiles.work]
 server = "https://vault.bitwarden.com"

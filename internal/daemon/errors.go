@@ -25,6 +25,11 @@ func rpcHandler[Req, Resp any](handler func(context.Context, Req) (Resp, error))
 		if errors.Is(err, vault.ErrStateChanged) {
 			return zero, &kit.RPCError{Code: vaultapi.StateChangedCode, Message: err.Error()}
 		}
+		var reprompt *vault.RepromptRequired
+		if errors.As(err, &reprompt) {
+			data, _ := json.Marshal(reprompt)
+			return zero, &kit.RPCError{Code: vaultapi.RepromptRequiredCode, Message: reprompt.Error(), Data: data}
+		}
 		var auth *vault.AuthRequired
 		if errors.As(err, &auth) {
 			code := vaultapi.UnlockRequiredCode

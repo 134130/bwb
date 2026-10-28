@@ -9,9 +9,10 @@ import (
 )
 
 type TOTPRequest struct {
-	Profile    string `json:"profile"`
-	ID         string `json:"id"`
-	Background bool   `json:"background,omitempty"`
+	RepromptToken string `json:"repromptToken,omitempty"`
+	Profile       string `json:"profile"`
+	ID            string `json:"id"`
+	Background    bool   `json:"background,omitempty"`
 }
 type TOTPResponse = bitwarden.OTP
 
@@ -34,7 +35,11 @@ func (s *Service) TOTP(ctx context.Context, req TOTPRequest) (TOTPResponse, erro
 	if err != nil {
 		return TOTPResponse{}, err
 	}
-	seed, err := p.session.Read(p.snapshot, entry.ID, "login/totp")
+	snapshot, err := s.itemSnapshot(ctx, p, req.Profile, entry.ID, req.RepromptToken)
+	if err != nil {
+		return TOTPResponse{}, err
+	}
+	seed, err := p.session.Read(snapshot, entry.ID, "login/totp")
 	if err != nil {
 		return TOTPResponse{}, err
 	}

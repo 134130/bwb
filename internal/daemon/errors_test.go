@@ -40,3 +40,17 @@ func TestDomainErrorTranslation(t *testing.T) {
 		}
 	}
 }
+
+func TestRepromptRPCContract(t *testing.T) {
+	result, err := rpcHandler(func(context.Context, vault.Empty) (vault.ReadResponse, error) {
+		return vault.ReadResponse{Value: "secret"}, &vault.RepromptRequired{Profile: "work", Item: "item-id"}
+	})(t.Context(), vault.Empty{})
+	var rpc *kit.RPCError
+	if result.Value != "" || !errors.As(err, &rpc) || rpc.Code != vaultapi.RepromptRequiredCode {
+		t.Fatal("missing reprompt code", err)
+	}
+	var details vaultapi.RepromptDetails
+	if json.Unmarshal(rpc.Data, &details) != nil || details.Profile != "work" || details.Item != "item-id" {
+		t.Fatal("missing reprompt identity")
+	}
+}

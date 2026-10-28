@@ -6,6 +6,11 @@ import (
 	daemon "github.com/134130/go-daemonkit"
 )
 
+type RepromptRequest = vault.RepromptRequest
+type RepromptResponse = vault.RepromptResponse
+type RepromptWatchRequest = vault.RepromptWatchRequest
+type RepromptDetails = vault.RepromptRequired
+
 type TOTPRequest = vault.TOTPRequest
 type TOTPResponse = vault.TOTPResponse
 
@@ -35,9 +40,10 @@ type DaemonStatusResponse struct {
 }
 
 const (
-	UnlockRequiredCode = -32010
-	LoginRequiredCode  = -32011
-	StateChangedCode   = -32012
+	RepromptRequiredCode = -32013
+	UnlockRequiredCode   = -32010
+	LoginRequiredCode    = -32011
+	StateChangedCode     = -32012
 )
 
 type AuthDetails struct {
@@ -55,23 +61,25 @@ type AuthWatchResponse = vault.AuthWatchResponse
 const AuthTimeout = vault.AuthTimeout
 
 var (
-	TOTP         = daemon.NewMethod[TOTPRequest, TOTPResponse]("vault.totp")
-	Describe     = daemon.NewMethod[DescribeRequest, DescribeResponse]("vault.describe")
-	Profiles     = daemon.NewMethod[Empty, ProfilesResponse]("vault.profiles")
-	Activity     = daemon.NewMethod[ProfileRequest, Empty]("vault.activity")
-	DaemonStatus = daemon.NewMethod[Empty, DaemonStatusResponse]("daemon.status")
-	Reload       = daemon.NewMethod[Empty, Empty]("vault.reload")
-	List         = daemon.NewMethod[ListRequest, ListResponse]("vault.list")
-	WatchAuth    = daemon.NewMethod[AuthEndRequest, AuthWatchResponse]("vault.watchAuth")
-	BeginAuth    = daemon.NewMethod[AuthRequest, AuthResponse]("vault.beginAuth")
-	EndAuth      = daemon.NewMethod[AuthEndRequest, Empty]("vault.endAuth")
-	Unlock       = daemon.NewMethod[UnlockRequest, Empty]("vault.unlock")
-	Logout       = daemon.NewMethod[ProfileRequest, Empty]("vault.logout")
-	Login        = daemon.NewMethod[LoginRequest, Empty]("vault.login")
-	LoginAPIKey  = daemon.NewMethod[LoginAPIKeyRequest, Empty]("vault.loginApiKey")
-	Read         = daemon.NewMethod[ReadRequest, ReadResponse]("vault.read")
-	Item         = daemon.NewMethod[ItemRequest, ItemResponse]("vault.item")
-	Sync         = daemon.NewMethod[ProfileRequest, Empty]("vault.sync")
-	Lock         = daemon.NewMethod[ProfileRequest, Empty]("vault.lock")
-	Status       = daemon.NewMethod[ProfileRequest, StatusResponse]("vault.status")
+	Reprompt      = daemon.NewMethod[RepromptRequest, RepromptResponse]("vault.reprompt")
+	WatchReprompt = daemon.NewMethod[RepromptWatchRequest, Empty]("vault.watchReprompt")
+	TOTP          = daemon.NewMethod[TOTPRequest, TOTPResponse]("vault.totp")
+	Describe      = daemon.NewMethod[DescribeRequest, DescribeResponse]("vault.describe")
+	Profiles      = daemon.NewMethod[Empty, ProfilesResponse]("vault.profiles")
+	Activity      = daemon.NewMethod[ProfileRequest, Empty]("vault.activity")
+	DaemonStatus  = daemon.NewMethod[Empty, DaemonStatusResponse]("daemon.status")
+	Reload        = daemon.NewMethod[Empty, Empty]("vault.reload")
+	List          = daemon.NewMethod[ListRequest, ListResponse]("vault.list")
+	WatchAuth     = daemon.NewMethod[AuthEndRequest, AuthWatchResponse]("vault.watchAuth")
+	BeginAuth     = daemon.NewMethod[AuthRequest, AuthResponse]("vault.beginAuth")
+	EndAuth       = daemon.NewMethod[AuthEndRequest, Empty]("vault.endAuth")
+	Unlock        = daemon.NewMethod[UnlockRequest, Empty]("vault.unlock")
+	Logout        = daemon.NewMethod[ProfileRequest, Empty]("vault.logout")
+	Login         = daemon.NewMethod[LoginRequest, Empty]("vault.login")
+	LoginAPIKey   = daemon.NewMethod[LoginAPIKeyRequest, Empty]("vault.loginApiKey")
+	Read          = daemon.NewMethod[ReadRequest, ReadResponse]("vault.read")
+	Item          = daemon.NewMethod[ItemRequest, ItemResponse]("vault.item")
+	Sync          = daemon.NewMethod[ProfileRequest, Empty]("vault.sync")
+	Lock          = daemon.NewMethod[ProfileRequest, Empty]("vault.lock")
+	Status        = daemon.NewMethod[ProfileRequest, StatusResponse]("vault.status")
 )

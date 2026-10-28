@@ -36,21 +36,24 @@ func (p *OTPPage) View(size Size) string {
 	return box("Authentication code\n\n"+body+"\n\n"+safe(p.Message)+"\ny copy · q close", size)
 }
 func (r *Root) openOTP(id string) tea.Cmd {
+	r.resetReprompt()
 	r.explorer.Detail.clearValue()
 	r.otp = &OTPPage{ID: id, Now: time.Now()}
 	return r.refreshOTP(true)
 }
 func (r *Root) refreshOTP(authenticate bool) tea.Cmd {
-	profile, id, client, executor := r.profile, r.otp.ID, r.client, r.executor
+	profile, id, executor := r.profile, r.otp.ID, r.executor
 	return r.operation("otp", func(ctx context.Context) (any, error) {
 		req := vaultapi.TOTPRequest{Profile: profile, ID: id, Background: !authenticate}
 		if authenticate {
 			return executor.TOTP(ctx, req)
 		}
-		return client.Invoke(ctx, vaultapi.TOTP, req)
+		executor.Prompt = nil
+		return executor.TOTP(ctx, req)
 	})
 }
 func (r *Root) closeOTP() {
+	r.resetReprompt()
 	if r.cancel != nil {
 		r.cancel()
 	}
@@ -101,12 +104,13 @@ func (r *Root) refreshInlineOTP() tea.Cmd {
 		return nil
 	}
 	d.otpPending = true
-	page, client, profile, lifetime := d.OTP, r.client, r.profile, r.ctx
+	page, executor, profile, lifetime := d.OTP, r.executor, r.profile, r.ctx
+	executor.Prompt = nil
 	id := page.ID
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(lifetime, 3*time.Second)
 		defer cancel()
-		code, err := client.Invoke(ctx, vaultapi.TOTP, vaultapi.TOTPRequest{Profile: profile, ID: id, Background: true})
+		code, err := executor.TOTP(ctx, vaultapi.TOTPRequest{Profile: profile, ID: id, Background: true})
 		return inlineOTPMsg{page, code, err}
 	}
 }

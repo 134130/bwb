@@ -11,7 +11,7 @@ Bitwarden를 CLI와 TUI로 사용하는 Go 클라이언트. Cobra CLI와 TUI →
 풀린 키는 daemon 메모리, refresh token 또는 개인 API Key는 OS credential store, 암호화된 vault는 로컬 SQLite에 보관한다.
 BW_SESSION이나 bw/rbw 실행 파일에 의존하지 않는다. 세부 설계와 구현 순서는 위 문서를 참고한다.
 
-필수 [integration snapshot](../testdata/integration/README.md)은 8종·19개 항목을 포함한다. `dev/integration/run.py`가 전용 서버에 복원해 실제 API를 검사하고, Lefthook pre-commit이 매 커밋마다 실행한다. 실행 준비는 개발 가이드를 따른다.
+필수 [integration snapshot](../testdata/integration/README.md)은 8종·21개 항목을 포함한다. `dev/integration/run.py`가 전용 서버에 복원해 실제 API를 검사하고, Lefthook pre-commit이 매 커밋마다 실행한다. 실행 준비는 개발 가이드를 따른다.
 
 ## 현재 실행 범위
 
@@ -110,7 +110,7 @@ main.go → internal/cli (Cobra + 인증 실행부)
 
 키와 access/refresh token의 장기 보관은 `memguard` locked memory를 사용한다. 평문 snapshot은 보관하지 않는다. crypto·HTTP·JSON·RPC 처리 중 임시 Go 문자열/버퍼는 생기며 모든 복사본의 즉시 zeroize를 보장하지 않는다. 메모리 보호 실패 시 평문 fallback은 없다. 같은 OS 사용자 프로세스는 daemon 접근 가능하다. daemonkit SQLite에는 암호화 vault와 계정 metadata만 기록하며 비밀번호·token은 넣지 않는다. cache record는 512 KiB 단위로 원자적으로 저장하며 최대 64 MiB다. Unix 경로는 `XDG_STATE_HOME`, 실행·keychain namespace는 `BWB_INSTANCE`로 격리한다. 테스트는 둘 모두 독립 값으로 설정한다.
 
-지원 범위는 PBKDF2(100000–2000000 iterations), 개인·조직 vault, AES-CBC/HMAC `2.` 암호문, 8종의 기본 필드다. 마스터 비밀번호 재확인(reprompt) 항목도 login/sync/offline unlock과 이름 목록은 지원한다. 해당 항목의 이름 외 필드 조회는 차단하며 Bitwarden 앱 사용을 안내한다. Argon2id, 2FA/SSO, 항목별 재확인 입력, passkey는 아직 지원하지 않는다. 공식 Bitwarden 서버와의 상호운용성은 별도 검증이 필요하다.
+지원 범위는 PBKDF2(100000–2000000 iterations), 개인·조직 vault, AES-CBC/HMAC `2.` 암호문, 8종의 기본 필드다. 마스터 비밀번호 재확인(reprompt) 항목도 login/sync/offline unlock과 이름 목록은 지원한다. 필드 조회는 항목별 마스터 비밀번호 재확인 후 허용한다. Argon2id, 2FA/SSO, passkey는 아직 지원하지 않는다. 공식 Bitwarden 서버와의 상호운용성은 별도 검증이 필요하다.
 
 ```sh
 go test ./...
@@ -181,7 +181,7 @@ bwb --profile personal tui
 
 Search·Explorer·Item은 같은 두께의 테두리를 사용하며 비활성 패널의 테두리만 dim 처리한다. 터미널 background 응답으로 dark/light 색상을 선택하고, 응답이 없으면 dark를 사용한다. 선택 행과 포커스는 별도로 표시하며 상태 메시지가 단축키 안내를 덮지 않는다.
 
-항목 선택은 Item RPC로 일반 값을 표시하고 민감한 값은 마스킹한다. `v`로 전체 민감 값을 가져오며, 필드 이동·pane 전환은 reveal을 유지한다. item 변경·검색 시작·도움말·profile 전환·sync는 민감 값을 제거한다. 기존 reprompt·권한 제한은 우회하지 않고 표시한다. 500ms 상태 조회로 잠금을 감지하면 tree·검색어·상세·비밀을 화면과 UI 상태에서 제거하고 다시 인증한 뒤 opaque ID로 위치를 복원한다. 연결 오류는 데이터 제거 후 Enter로 재연결한다. 중단된 daemon은 기존 CLI config 경로로 다시 시작하며, 필요 시 인증 후 목록을 다시 읽는다. 실패하면 오류를 표시하고 Enter로 재시도할 수 있다. 연결 대기는 Esc로 취소하며 이전 작업은 재실행하지 않는다. 이미 표시된 터미널 내용과 Go 문자열의 물리적 소거는 보장하지 않는다.
+항목 선택은 Item RPC로 일반 값을 표시하고 민감한 값은 마스킹한다. `v`로 전체 민감 값을 가져오며, 필드 이동·pane 전환은 reveal을 유지한다. item 변경·검색 시작·도움말·profile 전환·sync는 민감 값을 제거한다. reprompt 항목은 Enter로 비밀번호 모달을 열며, 조직 권한 제한은 그대로 유지한다. 500ms 상태 조회로 잠금을 감지하면 tree·검색어·상세·비밀을 화면과 UI 상태에서 제거하고 다시 인증한 뒤 opaque ID로 위치를 복원한다. 연결 오류는 데이터 제거 후 Enter로 재연결한다. 중단된 daemon은 기존 CLI config 경로로 다시 시작하며, 필요 시 인증 후 목록을 다시 읽는다. 실패하면 오류를 표시하고 Enter로 재시도할 수 있다. 연결 대기는 Esc로 취소하며 이전 작업은 재실행하지 않는다. 이미 표시된 터미널 내용과 Go 문자열의 물리적 소거는 보장하지 않는다.
 
 검색·탐색 같은 실제 사용자 조작은 최대 초당 한 번 Activity RPC로 idle 시간을 갱신한다. 백그라운드 목록·상태 polling·TOTP 갱신은 시간을 연장하지 않는다. 항목 상세·reveal·복사는 CLI와 같은 조회 활동 정책을 따른다. CLI에서는 상세에 표시된 `url/1` 같은 키로 URL을 읽는다.
 
@@ -217,3 +217,17 @@ bwb: daemon v0.3.0 is older than CLI v0.4.0. Run: bwb daemon update
 
 
 필드는 TUI 상세에서 `y`로 reveal 없이 복사할 수 있다. CLI는 `bwb item read ITEM --field password --copy`를 사용한다. 성공 메시지 `Copied`는 stderr에만 출력하며 stdout은 비운다. `--copy`는 단일 `--field`가 필요하며 `--reveal`·JSON 출력과 함께 사용할 수 없다. 클립보드 실패 시 평문 출력으로 대체하지 않는다. TUI에서 필드·pane 이동, 잠금, 도움말 전환 등으로 취소된 복사 요청의 결과는 클립보드에 쓰지 않는다. 복사한 값은 기존 TOTP와 마찬가지로 자동 삭제하지 않는다.
+
+
+### Item master password reprompt
+
+`reprompt=1` 항목은 목록에서 이름만 표시한다. CLI 조회·복사·TOTP는 대화형 비밀번호 재확인 후 계속하며, 비대화형 요청은 reprompt 오류를 반환한다. TUI에서는 항목에서 Enter 또는 v로 재확인 모달을 연다. Esc는 현재 위치를 유지하고 취소하며, 오답은 재시도를 요구한다. 확인 후에도 민감 값은 기본 마스킹된다.
+
+검증은 현재 vault의 KDF와 보호된 키를 사용하며 서버 로그인·세션 교체를 하지 않는다. 임시 capability는 profile·item에 한정된다. TUI는 같은 항목의 필드 이동·pane 전환·reveal/hide·TOTP 갱신에 재사용한다. 항목 이탈·검색·도움말·profile 전환·sync·잠금·연결 종료·config reload에서 폐기한다. CLI는 명령 종료 시 폐기한다. 연결 감시가 시작되지 않은 capability는 2분 뒤 만료된다. capability는 비밀번호를 포함하지 않는 임의 bearer token이며 디스크에 저장하지 않는다.
+
+```toml
+[profiles.personal]
+insecure_skip_reprompt = false
+```
+
+기본값은 false. true는 unlocked vault에서 항목 재확인만 생략하며, login/unlock·조직 권한 제한·기본 마스킹은 유지한다. 파일 수정 후 `bwb daemon reload`로 적용한다. Profiles 화면에서 파일 값과 적용값을 확인할 수 있다.
