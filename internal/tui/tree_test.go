@@ -10,6 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/134130/bwb/internal/vaultapi"
+	"github.com/134130/bwb/internal/vaultclient"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -146,6 +147,11 @@ func TestAuthenticationInputOwnsFocusAndValue(t *testing.T) {
 	r.purge()
 	if r.auth != nil {
 		t.Fatal("prompt retained")
+	}
+	r.Update(promptMsg{Context: ctx, Request: vaultclient.AuthPrompt{Label: "Server URL", Public: true}, Reply: make(chan []byte)})
+	r.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	if !strings.Contains(ansi.Strip(r.View().Content), "Server URL: a") {
+		t.Fatal("server input was hidden")
 	}
 }
 

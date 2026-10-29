@@ -100,6 +100,18 @@ func Run(ctx context.Context, configFlag string) error {
 	if err := app.Handle(vaultapi.LoginAPIKey, rpcHandler(service.LoginAPIKey)); err != nil {
 		return err
 	}
+	if err := app.Handle(vaultapi.LoginSSO, rpcHandler(service.LoginSSO)); err != nil {
+		return err
+	}
+	if err := app.Handle(vaultapi.PlanLogin, rpcHandler(service.PlanLogin)); err != nil {
+		return err
+	}
+	if err := app.Handle(vaultapi.ExchangeSSO, rpcHandler(service.ExchangeSSO)); err != nil {
+		return err
+	}
+	if err := app.Handle(vaultapi.FinishSSO, rpcHandler(service.FinishSSO)); err != nil {
+		return err
+	}
 	if err := app.Handle(vaultapi.List, rpcHandler(service.List)); err != nil {
 		return err
 	}

@@ -373,7 +373,11 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return r, nil
 		}
 		r.explorer.Detail.clearValue()
-		input := newInput(true)
+		input := newInput(!m.Request.Public)
+		input.CharLimit = 4096
+		if m.Request.Label != "" {
+			input.Prompt = m.Request.Label + ": "
+		}
 		input.setTheme(r.light)
 		input.Update(LayoutMsg{}, Size{max(0, min(72, size.Width)-4), 1})
 		r.auth = &authDialog{Prompt: m, Input: input}
@@ -555,7 +559,7 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				r.auth.Input.SetValue("")
 				if len(password) == 0 || len(password) > 4096 {
 					clear(password)
-					r.message = "Password must contain 1–4096 bytes"
+					r.message = "Input must contain 1–4096 bytes"
 					return r, nil
 				}
 				select {

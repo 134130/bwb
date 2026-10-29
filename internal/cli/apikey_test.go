@@ -68,7 +68,7 @@ func TestAPIKeyFlagDoesNotFallBackToPassword(t *testing.T) {
 
 func TestOtherCommandsDiscardAPIKeyEnvironment(t *testing.T) {
 	isolateConfig(t)
-	for _, args := range [][]string{{"config", "path"}, {"login", "--password-stdin", "--non-interactive"}} {
+	for _, args := range [][]string{{"config", "path"}, {"login", "--non-interactive"}} {
 		t.Setenv("BWB_CLIENTID", "invalid-unused-id")
 		t.Setenv("BWB_CLIENTSECRET", "unused-secret")
 		cmd := NewRoot()

@@ -70,11 +70,11 @@ func TestPasswordInputBounded(t *testing.T) {
 	isolateConfig(t)
 	for _, input := range []string{"", "\n", strings.Repeat("x", 4099), strings.Repeat("x", 4096) + "\r\n" + "ignored"} {
 		root := NewRoot()
+		root.SetContext(t.Context())
 		root.SetIn(strings.NewReader(input))
 		root.SetOut(&bytes.Buffer{})
 		root.SetErr(&bytes.Buffer{})
-		root.SetArgs([]string{"login", "--server", "http://127.0.0.1:1", "--email", "user@example.invalid", "--password-stdin"})
-		err := root.Execute()
+		_, err := commandPassword(root, true, true, authPrompt{})
 		if err == nil || !strings.Contains(err.Error(), "password") {
 			t.Fatal("invalid password input reached network", err)
 		}
@@ -93,9 +93,9 @@ func TestPasswordInputCancellation(t *testing.T) {
 		root.SetIn(reader)
 		root.SetOut(&bytes.Buffer{})
 		root.SetErr(&bytes.Buffer{})
-		root.SetArgs([]string{"login", "--server", "http://127.0.0.1:1", "--email", "user@example.invalid", "--password-stdin"})
+		root.SetContext(ctx)
 		result := make(chan error, 1)
-		go func() { result <- root.ExecuteContext(ctx) }()
+		go func() { _, err := commandPassword(root, true, true, authPrompt{}); result <- err }()
 		if _, err := writer.Write([]byte("partial password")); err != nil {
 			t.Fatal(err)
 		}

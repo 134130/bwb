@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
+	"github.com/charmbracelet/x/ansi"
 	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 )
@@ -44,7 +46,12 @@ func readTerminalPassword(ctx context.Context, tty *os.File, fd int, request aut
 	if label == "" {
 		label = "Password"
 	}
-	if _, err := fmt.Fprintf(tty, "%s %q (%q at %q)\r\n%s: ", request.Action, request.Profile, request.Email, request.Server, label); err != nil {
+	if !request.Public {
+		if _, err := fmt.Fprintf(tty, "%s %q (%q at %q)\r\n", request.Action, request.Profile, request.Email, request.Server); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := fmt.Fprintf(tty, "%s: ", label); err != nil {
 		return nil, err
 	}
 	buffer := make([]byte, 4096)
@@ -91,29 +98,54 @@ func readTerminalPassword(ctx context.Context, tty *os.File, fd int, request aut
 		case 4:
 			return nil, io.EOF
 		case '\r', '\n':
+			if request.Public && n == 0 && !overlong {
+				return buffer[:0], nil
+			}
 			if n == 0 || overlong {
+				if request.Public {
+					return nil, errors.New("input must contain 1–4096 bytes")
+				}
 				return nil, errors.New("invalid password length")
 			}
 			return buffer[:n], nil
 		case 8, 127:
 			if n > 0 {
+				end := n
 				n--
 				for n > 0 && buffer[n]&0xc0 == 0x80 {
 					n--
 				}
+				if request.Public {
+					if _, err := fmt.Fprint(tty, strings.Repeat("\b \b", ansi.StringWidth(string(buffer[n:end])))); err != nil {
+						return nil, err
+					}
+				}
 				clear(buffer[n:])
 			}
 		case 21:
+			if request.Public {
+				if _, err := fmt.Fprint(tty, strings.Repeat("\b \b", ansi.StringWidth(string(buffer[:n])))); err != nil {
+					return nil, err
+				}
+			}
 			clear(buffer)
 			n = 0
 			overlong = false
 		default:
+			if request.Public && c < 32 {
+				continue
+			}
 			if n == len(buffer) {
 				overlong = true
 				continue
 			}
 			buffer[n] = c
 			n++
+			if request.Public {
+				if _, err := tty.Write([]byte{c}); err != nil {
+					return nil, err
+				}
+			}
 		}
 	}
 }

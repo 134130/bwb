@@ -34,48 +34,55 @@ func NewRoot() *cobra.Command {
 	var server, email string
 	var passwordStdin bool
 	var apiKeyLogin bool
+	var ssoLogin bool
+	var ssoIdentifier string
 	login := &cobra.Command{Use: "login", Short: "Log in and cache an encrypted snapshot", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if server != "" && (email != "" || apiKeyLogin) {
+			if cmd.Flags().Changed("identifier") && !ssoLogin {
+				return errors.New("--identifier requires --sso")
+			}
+			if !apiKeyLogin {
+				return commandLogin(cmd, profile, server, email, ssoIdentifier, ssoLogin, passwordStdin, nonInteractive)
+			}
+			if server != "" {
 				if _, err := bitwarden.NewClient(server, email, uuid.NewString()); err != nil {
 					return err
 				}
 			}
-			var apiKey bitwarden.APIKey
-			if apiKeyLogin {
-				var err error
-				apiKey, err = commandAPIKey(cmd, nonInteractive, authPrompt{Action: "login", Profile: profile, Server: server, Email: email})
-				defer clear(apiKey.ClientSecret)
-				if err != nil {
-					return err
-				}
-			}
-			password, err := commandPassword(cmd, passwordStdin, nonInteractive, authPrompt{Action: "login", Profile: profile, Server: server, Email: email})
+			apiKey, err := commandAPIKey(cmd, nonInteractive, authPrompt{Action: "login", Profile: profile, Server: server, Email: email})
+			defer clear(apiKey.ClientSecret)
 			if err != nil {
 				return err
 			}
-			defer clear(password)
 			client, err := connectCommand(cmd)
 			if err != nil {
 				return err
 			}
 			defer client.Close()
-			req := vaultapi.LoginRequest{Profile: profile, Server: server, Email: email, Password: password}
-			if apiKeyLogin {
-				_, err = client.Invoke(cmd.Context(), vaultapi.LoginAPIKey, vaultapi.LoginAPIKeyRequest{LoginRequest: req, APIKey: apiKey})
-				var rpc *kit.RPCError
-				if errors.As(err, &rpc) && rpc.Code == -32601 {
-					return errors.New("API key login requires an updated daemon; run daemon update")
-				}
-			} else {
-				_, err = client.Invoke(cmd.Context(), vaultapi.Login, req)
+			loginServer, loginEmail, err := loginIdentity(cmd, client, profile, server, email, false, nonInteractive)
+			if err != nil {
+				return err
+			}
+			password, err := commandPassword(cmd, passwordStdin, nonInteractive, authPrompt{Action: "login", Profile: profile, Server: loginServer, Email: loginEmail})
+			if err != nil {
+				return err
+			}
+			defer clear(password)
+			req := vaultapi.LoginRequest{Profile: profile, Server: loginServer, Email: loginEmail, Password: password}
+			_, err = client.Invoke(cmd.Context(), vaultapi.LoginAPIKey, vaultapi.LoginAPIKeyRequest{LoginRequest: req, APIKey: apiKey})
+			var rpc *kit.RPCError
+			if errors.As(err, &rpc) && rpc.Code == -32601 {
+				return errors.New("API key login requires an updated daemon; run daemon update")
 			}
 			return err
 		}}
 	login.Flags().StringVar(&server, "server", "", "Vault URL (HTTPS, or loopback HTTP)")
-	login.Flags().StringVar(&email, "email", "", "Account email (optional with --apikey)")
+	login.Flags().StringVar(&email, "email", "", "Account email (optional with --apikey or --sso)")
 	login.Flags().BoolVar(&passwordStdin, "password-stdin", false, "Read master password from stdin")
 	login.Flags().BoolVar(&apiKeyLogin, "apikey", false, "Authenticate with a personal API key, then unlock with the master password")
+	login.Flags().BoolVar(&ssoLogin, "sso", false, "Authenticate through browser SSO (including Okta), then unlock with the master password")
+	login.Flags().StringVar(&ssoIdentifier, "identifier", "", "Organization SSO identifier (optional with --sso)")
+	login.MarkFlagsMutuallyExclusive("apikey", "sso")
 	var unlockStdin bool
 	unlock := &cobra.Command{Use: "unlock", Short: "Unlock a saved vault without network access", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		password, err := commandPassword(cmd, unlockStdin, nonInteractive, authPrompt{Action: "unlock", Profile: profile})
@@ -242,6 +249,10 @@ func passwordInput(cmd *cobra.Command) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	return trimPassword(password)
+}
+
+func trimPassword(password []byte) ([]byte, error) {
 	input := password
 	if bytes.HasSuffix(input, []byte("\n")) {
 		input = bytes.TrimSuffix(input, []byte("\n"))

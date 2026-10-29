@@ -4,13 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"time"
+	"strings"
 
+	"github.com/134130/bwb/internal/bitwarden"
 	"github.com/134130/bwb/internal/vaultapi"
 	kit "github.com/134130/go-daemonkit"
+	"github.com/google/uuid"
 )
 
-type AuthPrompt struct{ Action, Profile, Server, Email, Label string }
+type AuthPrompt struct {
+	Action, Profile, Server, Email, Label string
+	Public                                bool
+}
 type PasswordPrompt func(context.Context, AuthPrompt) ([]byte, error)
 
 type Executor struct {
@@ -75,46 +80,37 @@ func (e Executor) authenticate(ctx context.Context, profile string, failure erro
 	if reservation.Ready {
 		return nil
 	}
-	if reservation.ID == "" || reservation.Server == "" || reservation.Email == "" {
+	if reservation.ID == "" || reservation.Email == "" || action != "login" && reservation.Server == "" {
 		return errors.New("invalid authentication reservation")
 	}
 	end := vaultapi.AuthEndRequest{Profile: profile, ID: reservation.ID}
-	defer func() {
-		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
-		defer cancel()
-		_, _ = e.Client.Invoke(cleanup, vaultapi.EndAuth, end)
-	}()
-	authCtx, cancel := context.WithTimeout(ctx, vaultapi.AuthTimeout)
-	defer cancel()
-	promptCtx, cancelPrompt := context.WithCancelCause(authCtx)
-	defer cancelPrompt(nil)
-	watchCtx, stopWatch := context.WithCancel(authCtx)
-	defer stopWatch()
-	watched := make(chan struct{})
-	go func() {
-		defer close(watched)
-		result, err := e.Client.Invoke(watchCtx, vaultapi.WatchAuth, end)
-		if err != nil {
-			cancelPrompt(err)
-		} else if !result.Succeeded {
-			cancelPrompt(errors.New("authentication canceled or vault state changed"))
+	return RunAuth(ctx, e.Client, end, vaultapi.AuthTimeout, func(authCtx context.Context) error {
+		if reservation.Server == "" {
+			server, err := e.Prompt(authCtx, AuthPrompt{Action: action, Profile: profile, Email: reservation.Email, Label: "Server URL", Public: true})
+			defer clear(server)
+			if err != nil {
+				return err
+			}
+			reservation.Server = strings.TrimSpace(string(server))
+			if _, err := bitwarden.NewClient(reservation.Server, reservation.Email, uuid.NewString()); err != nil {
+				return err
+			}
 		}
-	}()
-	defer func() { stopWatch(); <-watched }()
-	password, err := e.Prompt(promptCtx, AuthPrompt{Action: action, Profile: profile, Server: reservation.Server, Email: reservation.Email})
-	defer clear(password)
-	if cause := context.Cause(promptCtx); cause != nil {
-		return cause
-	}
-	if err != nil {
+		password, err := e.Prompt(authCtx, AuthPrompt{Action: action, Profile: profile, Server: reservation.Server, Email: reservation.Email})
+		defer clear(password)
+		if err != nil {
+			return err
+		}
+		if err := authCtx.Err(); err != nil {
+			return err
+		}
+		if action == "unlock" {
+			_, err = e.Client.Invoke(authCtx, vaultapi.Unlock, vaultapi.UnlockRequest{Profile: profile, Password: password, AuthID: reservation.ID})
+		} else {
+			_, err = e.Client.Invoke(authCtx, vaultapi.Login, vaultapi.LoginRequest{Profile: profile, Server: reservation.Server, Email: reservation.Email, Password: password, AuthID: reservation.ID})
+		}
 		return err
-	}
-	if action == "unlock" {
-		_, err = e.Client.Invoke(authCtx, vaultapi.Unlock, vaultapi.UnlockRequest{Profile: profile, Password: password, AuthID: reservation.ID})
-	} else {
-		_, err = e.Client.Invoke(authCtx, vaultapi.Login, vaultapi.LoginRequest{Profile: profile, Server: reservation.Server, Email: reservation.Email, Password: password, AuthID: reservation.ID})
-	}
-	return err
+	})
 }
 
 // List buffers all pages before output; authentication retries restart the whole query.

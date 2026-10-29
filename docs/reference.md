@@ -72,7 +72,7 @@ SQLite와 keychain은 분산 트랜잭션이 아니므로 credential 참조와 �
 
 새 바이너리를 빌드한 뒤 `.dev/bwb daemon update`로 daemonkit이 선택한 실행 파일을 갱신한다. 다른 내용의 바이너리면 daemon이 재시작되어 unlock이 필요하다. 동일 바이너리는 no-op이다. config 파일과 profile별 idle timeout을 지원한다.
 
-대화형 `login/unlock`은 `--password-stdin` 없이도 비밀번호를 입력받는다. `item read/item totp/list/sync`의 자동 인증은 stdin이 TTY이고 `--non-interactive`가 아닐 때만 실행한다. stdout이 pipe여도 prompt는 controlling terminal에 표시하므로 출력 데이터와 섞이지 않는다. 비TTY 실행은 입력을 소비하지 않고 인증 필요 오류를 반환한다. 최초 로그인 정보가 없는 profile은 `login --server ... --email ...`로 먼저 준비한다.
+대화형 `login/unlock`은 `--password-stdin` 없이도 비밀번호를 입력받는다. `item read/item totp/list/sync`의 자동 인증은 stdin이 TTY이고 `--non-interactive`가 아닐 때만 실행한다. stdout이 pipe여도 prompt는 controlling terminal에 표시하므로 출력 데이터와 섞이지 않는다. 비TTY 실행은 입력을 소비하지 않고 인증 필요 오류를 반환한다. 최초 로그인 정보가 없는 profile은 `login`에서 서버 URL과 이메일을 입력한다. 명시적 `--server`/`--email`이나 저장된 값이 있으면 묻지 않는다. 주소와 이메일은 보이는 입력이며 잘못된 값은 다시 입력받는다. 비TTY/`--non-interactive`에서는 빠진 필드를 명시하도록 안내하며 stdin의 비밀번호를 소비하지 않는다. 서버는 로그인에 성공한 profile에만 저장하고 config에서는 지정하지 않는다.
 
 자동 인증은 profile당 prompt 소유자 하나를 예약하고 다른 CLI는 결과를 기다린다. 소유자의 취소·연결 종료·lock/logout은 예약을 폐기하며 대기자에게 새 prompt를 연쇄 생성하지 않는다. 응답 직후 연결 감시를 시작하기 전 이탈 같은 경우를 위해 미사용 예약은 2분 뒤 만료된다. 비밀번호는 daemon 예약에 보관하지 않는다. 암호화 실패·네트워크·keychain 장애는 자동 로그인으로 바꾸지 않는다. 잠금과 서버 로그인 만료가 겹치면 1회 복구 한도 때문에 명시적 login이 필요할 수 있다.
 
@@ -84,7 +84,7 @@ SQLite와 keychain은 분산 트랜잭션이 아니므로 credential 참조와 �
 bwb login --apikey --profile work --server SERVER_URL
 ```
 
-`client_id`, `client_secret`, 마스터 비밀번호를 숨김 입력으로 받는다. `--email`은 선택 사항이다. 최초 로그인에서 이메일을 생략하면 API Key 인증 후 서버 프로필에서 조회하고 계정 ID를 검증한다. config 또는 기존 로그인에 이메일이 있으면 그 값을 사용하며, 명시한 이메일도 실제 계정과 일치해야 한다. 설정에 server가 있으면 `--server`도 생략할 수 있다. 기존 login처럼 첫 sync와 unlock까지 성공해야 로그인을 저장한다. API Key는 서버 인증에 사용하고, 마스터 비밀번호는 로컬 복호화에만 사용한다. 개인 키(`user.<account UUID>`)만 지원하며 조직 API Key와 Secrets Manager 토큰은 받지 않는다.
+`client_id`, `client_secret`, 마스터 비밀번호를 숨김 입력으로 받는다. `--email`은 선택 사항이다. 최초 로그인에서 이메일을 생략하면 API Key 인증 후 서버 프로필에서 조회하고 계정 ID를 검증한다. config 또는 기존 로그인에 이메일이 있으면 그 값을 사용하며, 명시한 이메일도 실제 계정과 일치해야 한다. 저장된 로그인에 서버가 있으면 `--server`를 생략할 수 있다. 최초 대화형 로그인에서는 빠진 서버 URL을 입력받는다. 기존 login처럼 첫 sync와 unlock까지 성공해야 로그인을 저장한다. API Key는 서버 인증에 사용하고, 마스터 비밀번호는 로컬 복호화에만 사용한다. 개인 키(`user.<account UUID>`)만 지원하며 조직 API Key와 Secrets Manager 토큰은 받지 않는다.
 
 자동화에서는 `BWB_CLIENTID`와 `BWB_CLIENTSECRET`을 안전하게 환경변수로 공급하고 다음 명령을 실행한다. `--password-stdin`에는 마스터 비밀번호만 전달한다.
 
@@ -96,7 +96,33 @@ API Key 환경변수는 `--apikey`일 때만 읽고, daemon 시작 전에 현재
 
 keychain에는 서버·이메일·계정 ID에 묶인 `client_id`와 `client_secret`을 저장한다. 메모리의 secret은 `memguard`로 보호하며 lock/종료 시 파기한다. unlock은 오프라인으로 가능하고, 다음 sync에서 keychain의 API Key로 재인증한다. 키가 폐기되면 `login --apikey`를 안내하며 비밀번호 로그인으로 전환하지 않는다. cached read는 계속 가능하다. logout은 로컬 키를 삭제하며 서버의 API Key 자체는 폐기하지 않는다.
 
-마스터 비밀번호가 있는 PBKDF2 계정만 지원한다. Key Connector·마스터 비밀번호 없는 계정·Argon2id·브라우저 SSO는 지원하지 않는다. 실행 중인 구 daemon은 `daemon update`로 갱신해야 한다. API Key profile은 v2 레코드를 사용해 구 바이너리가 거부하며, 기존 비밀번호 profile의 v1 레코드는 계속 읽는다. 구 버전으로 내리려면 새 버전에서 API Key profile을 먼저 logout한다.
+마스터 비밀번호가 있는 PBKDF2 계정만 지원한다. Key Connector·마스터 비밀번호 없는 계정·Argon2id는 지원하지 않는다. 실행 중인 구 daemon은 `daemon update`로 갱신해야 한다. API Key profile은 v2 레코드를 사용해 구 바이너리가 거부하며, 기존 비밀번호 profile의 v1 레코드는 계속 읽는다. 구 버전으로 내리려면 새 버전에서 API Key profile을 먼저 logout한다.
+
+### Okta / 조직 SSO 로그인
+
+기존 API Key profile도 일반 `login`에서 SSO가 발견되거나 `login --sso`를 지정하면 같은 계정의 SSO로 전환할 수 있다. 성공 전에는 기존 cache와 자격증명을 유지하며, 취소·복호화·저장 실패는 기존 로그인 방식을 바꾸지 않는다. SSO가 발견되지 않으면 API Key 재로그인은 `login --apikey`로 진행한다.
+
+```sh
+bwb login --profile work --server https://vault.example.com --email you@example.com
+# 자동 탐색이 지원되지 않거나 조직 도메인이 등록되지 않은 경우
+bwb login --sso --profile work --server https://vault.example.com --identifier YOUR_ORG
+# 첫 로그인 성공 이후
+bwb login --profile work
+```
+
+일반 `login`은 비밀번호를 읽기 전에 이메일로 [검증된 조직 도메인 탐색 API](https://github.com/bitwarden/clients/blob/main/libs/common/src/admin-console/services/organization-domain/org-domain-api.service.ts)를 호출한다. 한 조직이 일치하면 SSO로 진행하고 identifier를 채운다. 빈 결과나 미지원 응답(404/405/501)은 비밀번호 로그인으로 진행하며, 네트워크·서버 장애나 잘못된 응답은 오류로 반환한다. 복수 조직은 `--sso --identifier`로 선택해야 한다. 이 조회는 계정의 SSO 강제 여부 전체를 알려주는 API가 아니므로, 도메인이 등록되지 않은 SSO 조직은 `--sso`를 사용한다. 명시적 SSO나 저장된 SSO profile은 탐색을 생략한다.
+
+Vaultwarden의 고정 더미 identifier는 SSO 활성 여부를 뜻하지 않으므로 `/identity/sso/prevalidate`로 추가 확인한다. 비활성 응답은 비밀번호 로그인으로 진행하고, 검증 중 장애는 오류로 반환한다. ([Vaultwarden 구현](https://github.com/dani-garcia/vaultwarden/blob/1.37.4/src/api/identity.rs))
+
+`--server`는 Okta 주소가 아닌 Bitwarden 웹 금고 주소다. 터미널에서 Bitwarden 마스터 비밀번호를 먼저 입력한 뒤, 브라우저에서 Bitwarden 조직에 설정된 SSO를 통해 Okta 로그인과 조직의 MFA를 완료한다. Okta 비밀번호와 client secret은 bwb가 받지 않는다. `--identifier`는 Bitwarden 관리 콘솔의 Single sign-on에 설정한 SSO 식별자이며 생략하면 브라우저에서 입력한다. `--sso`에서는 `--email`도 선택 사항이며 인증 후 서버 프로필에서 확인한다. 서버는 저장된 로그인에서, 이메일은 config 또는 저장된 로그인에서 가져온다. 최초 대화형 로그인에서 서버가 없으면 입력받고, 다른 계정으로 인증하면 저장하지 않는다. 성공한 SSO profile에는 로그인 방식과 identifier도 저장해 다음 `login --profile work`에서 재사용한다.
+
+[공식 CLI의 브라우저 SSO 흐름](https://github.com/bitwarden/clients/blob/main/apps/cli/src/auth/commands/login.command.ts)에 맞춰 Authorization Code + PKCE를 사용한다. 콜백은 로컬 8065–8070 포트 중 사용 가능한 하나에서 받고, state와 중복 응답을 검증한다. 마스터 비밀번호 입력을 마친 뒤 브라우저를 열고, 콜백을 받으면 코드를 토큰으로 교환한 다음 미리 받은 비밀번호로 금고를 연다. 브라우저 대기 중 비밀번호는 CLI의 잠긴 메모리에만 보관하며, 사용·실패·취소 후 파기한다. 잘못된 비밀번호는 브라우저 인증을 반복하지 않고 재입력할 수 있으며, `--password-stdin`은 한 번만 읽는다. profile당 인증 소유자 하나만 브라우저를 열고 다른 CLI는 결과를 기다린다. 브라우저·토큰 교환·비밀번호 입력을 포함한 예약은 5분 뒤 만료되며, 취소·연결 종료·lock/logout·daemon 종료 때 대기 토큰을 파기하고 늦은 콜백/입력을 거부한다.
+
+브라우저가 열리지 않으면 stderr의 URL을 같은 컴퓨터에서 직접 연다. `--apikey`와 함께 사용할 수 없고, `--non-interactive`는 브라우저 실행 전에 오류를 반환한다. 비TTY 입력은 `--password-stdin`으로 마스터 비밀번호만 공급할 수 있지만 브라우저 인증은 여전히 필요하다.
+
+마스터 비밀번호는 로컬 금고 복호화에만 사용한다. 로그인·복호화·첫 sync가 모두 성공해야 기존 keychain/cache 저장 흐름으로 반영한다. SSO refresh token은 keychain에 저장하고, 재시작 후에도 `cli` OAuth client로 갱신한다. unlock은 오프라인으로 가능하다. SSO 세션이 만료되면 `login --sso`를 안내하며 비밀번호 로그인으로 전환하지 않는다. TUI에서는 로그인 후 기존 profile을 선택해 사용한다.
+
+마스터 비밀번호가 있는 PBKDF2 계정을 지원한다. Key Connector, 마스터 비밀번호 없는 Trusted Device 계정, Argon2id, Okta 인증 이후 Bitwarden 자체가 추가로 요구하는 two-step login은 지원하지 않는다. 실제 Okta/Bitwarden 서버 연동은 아직 검증하지 않았으며, 모의 서버로 코드 교환·계정 검증·토큰 갱신·실패 복구를 검사한다. SSO profile은 v3 레코드, 분할 credential은 v4 레코드로 구 daemon의 오해석을 막는다. 새 바이너리에서 `bwb daemon update`를 실행하고, SSO 미지원 버전으로 내리기 전에는 해당 profile을 logout한다.
 
 ```text
 main.go → internal/cli (Cobra + 인증 실행부)
@@ -108,9 +134,9 @@ main.go → internal/cli (Cobra + 인증 실행부)
           internal/bitwarden (HTTP, crypto, encrypted snapshot)
 ```
 
-키와 access/refresh token의 장기 보관은 `memguard` locked memory를 사용한다. 평문 snapshot은 보관하지 않는다. crypto·HTTP·JSON·RPC 처리 중 임시 Go 문자열/버퍼는 생기며 모든 복사본의 즉시 zeroize를 보장하지 않는다. 메모리 보호 실패 시 평문 fallback은 없다. 같은 OS 사용자 프로세스는 daemon 접근 가능하다. daemonkit SQLite에는 암호화 vault와 계정 metadata만 기록하며 비밀번호·token은 넣지 않는다. cache record는 512 KiB 단위로 원자적으로 저장하며 최대 64 MiB다. Unix 경로는 `XDG_STATE_HOME`, 실행·keychain namespace는 `BWB_INSTANCE`로 격리한다. 테스트는 둘 모두 독립 값으로 설정한다.
+키와 access/refresh token의 장기 보관은 `memguard` locked memory를 사용한다. 평문 snapshot은 보관하지 않는다. crypto·HTTP·JSON·RPC 처리 중 임시 Go 문자열/버퍼는 생기며 모든 복사본의 즉시 zeroize를 보장하지 않는다. 메모리 보호 실패 시 평문 fallback은 없다. 같은 OS 사용자 프로세스는 daemon 접근 가능하다. daemonkit SQLite에는 암호화 vault와 계정 metadata만 기록하며 비밀번호·token은 넣지 않는다. cache record는 512 KiB 단위로 원자적으로 저장하며 최대 64 MiB다. Credential JSON은 최대 64 KiB이며, 2,560바이트를 넘으면 여러 OS keychain 항목으로 나눠 저장한다. 토큰 갱신은 새 조각을 모두 저장한 뒤 참조를 바꾸고, 미완료 쓰기와 이전 조각은 정리 목록으로 복구한다. 기존 단일 항목도 계속 읽으며 logout은 모든 조각을 삭제한다. 분할 credential이 있는 profile은 구 버전으로 내리기 전에 logout한다. Unix 경로는 `XDG_STATE_HOME`, 실행·keychain namespace는 `BWB_INSTANCE`로 격리한다. 테스트는 둘 모두 독립 값으로 설정한다.
 
-지원 범위는 PBKDF2(100000–2000000 iterations), 개인·조직 vault, AES-CBC/HMAC `2.` 암호문, 8종의 기본 필드다. 마스터 비밀번호 재확인(reprompt) 항목도 login/sync/offline unlock과 이름 목록은 지원한다. 필드 조회는 항목별 마스터 비밀번호 재확인 후 허용한다. Argon2id, 2FA/SSO, passkey는 아직 지원하지 않는다. 공식 Bitwarden 서버와의 상호운용성은 별도 검증이 필요하다.
+지원 범위는 PBKDF2(100000–2000000 iterations), 개인·조직 vault, AES-CBC/HMAC `2.` 암호문, 8종의 기본 필드다. 마스터 비밀번호 재확인(reprompt) 항목도 login/sync/offline unlock과 이름 목록은 지원한다. 필드 조회는 항목별 마스터 비밀번호 재확인 후 허용한다. SSO는 위의 마스터 비밀번호 기반 흐름을 지원하며, Argon2id, Bitwarden 자체의 추가 two-step login, passkey는 아직 지원하지 않는다. 공식 Bitwarden 서버와의 상호운용성은 별도 검증이 필요하다.
 
 ```sh
 go test ./...
@@ -129,20 +155,20 @@ integration은 실제 Vaultwarden에서 Go API 코드와 빌드된 CLI·daemon�
 
 첫 목록 요청에서 이름·소속 metadata만 복호화해 profile 메모리에 index를 만든다. 원문 비밀 필드는 index에 넣지 않으며 후속 목록은 index를 재사용한다. 이름 자체는 민감할 수 있고 Go 메모리 index의 즉시 zeroize는 보장하지 않는다. 성공한 login/unlock/sync와 lock/logout/shutdown에서 index 참조를 폐기한다. RPC는 최대 128행·JSON 48 KiB씩 전달하며 cursor는 profile/query/index generation에 묶인다. 한 행이 한도를 넘으면 명시적으로 실패한다. CLI는 전 페이지를 받은 뒤 출력하며 도중 snapshot 변경은 부분 출력 없이 재실행을 요구한다. 자동 인증은 목록 전체를 최대 한 번 재시도한다.
 
-Config는 `${XDG_CONFIG_HOME:-$HOME/.config}/bwb/config.toml`에서 읽는다(macOS도 동일). `--config > BWB_CONFIG > 기본 경로`로 한 파일만 선택하며 병합하지 않는다. 기본 파일이 없으면 기존 명령을 그대로 사용하고, 명시한 파일이 없으면 실패한다. TOML schema는 [예제](../dev/config.example.toml)를 따른다. Version 1, 존재하는 default_profile, `[a-z][a-z0-9_-]{0,31}` profile 이름, 서버·이메일·비음수 lock_timeout을 검증한다. 생략된 timeout은 0s이며 알 수 없는 키(비밀번호/token 포함)는 거부한다. 파일을 만들거나 수정하는 명령은 아직 없다.
+Config는 `${XDG_CONFIG_HOME:-$HOME/.config}/bwb/config.toml`에서 읽는다(macOS도 동일). `--config > BWB_CONFIG > 기본 경로`로 한 파일만 선택하며 병합하지 않는다. 기본 파일이 없으면 기존 명령을 그대로 사용하고, 명시한 파일이 없으면 실패한다. TOML schema는 [예제](../dev/config.example.toml)를 따른다. Version 1, 존재하는 default_profile, `[a-z][a-z0-9_-]{0,31}` profile 이름, 이메일·비음수 lock_timeout을 검증한다. `server` 필드는 제거되었으므로 기존 파일에서 삭제하고 최초 `login`에서 입력하거나 `--server`로 전달한다. 생략된 timeout은 0s이며 알 수 없는 키(비밀번호/token 포함)는 거부한다. 파일을 만들거나 수정하는 명령은 아직 없다.
 
 ```sh
 bwb config path
 bwb config validate
 bwb profile list
 bwb profile show personal
-bwb --profile personal login                 # config의 서버·이메일 사용
+bwb --profile personal login                 # 최초 서버 입력, 이후 저장된 서버 사용
 bwb --config ./test.toml item list
 ```
 
-Profile 선택은 `--profile > BWB_PROFILE > default_profile > default`다. 명시적 profile이나 BWB_PROFILE이 있으면 일반 명령은 TOML을 읽지 않는다. 기본 profile 결정과 `config/profile` 검사 명령만 파일을 읽는다. `profile list/show`는 디스크의 설정을 보여주며 실행 중 daemon 설정을 의미하지 않는다. Login의 생략된 server/email은 daemon에 적용된 profile에서 가져오며, 명시한 값이 해당 identity와 다르면 거부한다. 잘못된 TOML에서도 `--profile NAME lock/logout/status`와 daemon stop은 실행 가능하다.
+Profile 선택은 `--profile > BWB_PROFILE > default_profile > default`다. 명시적 profile이나 BWB_PROFILE이 있으면 일반 명령은 TOML을 읽지 않는다. 기본 profile 결정과 `config/profile` 검사 명령만 파일을 읽는다. `profile list/show`는 디스크의 설정을 보여주며 실행 중 daemon 설정을 의미하지 않는다. Login의 생략된 서버는 저장된 인증 profile에서, 이메일은 daemon에 적용된 config 또는 저장된 profile에서 가져온다. 최초 대화형 로그인에서 없는 값만 입력받으며, 명시한 값이 저장된 identity와 다르면 거부한다. 잘못된 TOML에서도 `--profile NAME lock/logout/status`와 daemon stop은 실행 가능하다.
 
-Daemon은 시작할 때 설정 경로를 확정하고 server/email/lock_timeout을 읽는다. 자동 시작 시 `--config` 또는 BWB_CONFIG의 경로를 전달한다. 이미 실행 중인 daemon의 파일 경로는 이후 CLI의 `--config`로 변경되지 않는다. 다른 경로를 쓰려면 daemon을 종료하고 새 경로로 시작한다. 재시작에도 같은 경로를 사용하려면 BWB_CONFIG를 설정하거나 `--config`를 다시 전달한다. `daemon run --config ...`는 foreground 실행 경로를 지정한다.
+Daemon은 시작할 때 설정 경로를 확정하고 email/lock_timeout을 읽는다. 자동 시작 시 `--config` 또는 BWB_CONFIG의 경로를 전달한다. 이미 실행 중인 daemon의 파일 경로는 이후 CLI의 `--config`로 변경되지 않는다. 다른 경로를 쓰려면 daemon을 종료하고 새 경로로 시작한다. 재시작에도 같은 경로를 사용하려면 BWB_CONFIG를 설정하거나 `--config`를 다시 전달한다. `daemon run --config ...`는 foreground 실행 경로를 지정한다.
 
 직접 파일을 수정한 뒤 `bwb config validate`, `bwb daemon reload`를 실행한다. Reload는 daemon 시작 시 선택한 파일 전체를 검증하고 성공할 때만 정책을 교체한다. 문법 오류·누락 파일·로그인된 profile의 identity 변경이나 삭제는 기존 정책을 유지한 채 거부한다. Identity 변경/삭제는 먼저 해당 profile을 logout한다. Logout은 인증 상태만 지우며 TOML 정의는 유지한다. Watcher는 없고 일반 조회는 정책을 적용하지 않는다. 정책은 DB에 저장하지 않으며, 이전 개발 버전의 DB policy 필드는 무시한다(인증 캐시는 유지).
 

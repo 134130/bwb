@@ -6,21 +6,18 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/url"
+	"net/mail"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
-	"github.com/134130/bwb/internal/bitwarden"
-	"github.com/google/uuid"
 	"github.com/pelletier/go-toml/v2"
 )
 
 type Profile struct {
 	InsecureSkipReprompt bool   `toml:"insecure_skip_reprompt" json:"insecureSkipReprompt"`
-	Server               string `toml:"server" json:"server"`
 	Email                string `toml:"email" json:"email"`
 	LockTimeout          string `toml:"lock_timeout" json:"lockTimeout"`
 }
@@ -37,12 +34,11 @@ func Normalize(p Profile) (Profile, error) {
 	if strings.TrimSpace(p.Email) == "" {
 		return Profile{}, errors.New("profile email is required")
 	}
-	if _, err := bitwarden.NewClient(p.Server, p.Email, uuid.NewString()); err != nil {
-		return Profile{}, err
-	}
-	endpoint, _ := url.Parse(p.Server)
-	p.Server = strings.TrimRight(endpoint.String(), "/")
 	p.Email = strings.ToLower(strings.TrimSpace(p.Email))
+	address, err := mail.ParseAddress(p.Email)
+	if err != nil || address.Address != p.Email {
+		return Profile{}, errors.New("invalid profile email")
+	}
 	if p.LockTimeout == "" {
 		p.LockTimeout = "0s"
 	}
@@ -106,6 +102,15 @@ func Load(path string, explicit bool) (*File, error) {
 	}
 	var config File
 	if err := toml.NewDecoder(bytes.NewReader(data)).DisallowUnknownFields().Decode(&config); err != nil {
+		var strict *toml.StrictMissingError
+		if errors.As(err, &strict) {
+			for _, field := range strict.Errors {
+				key := field.Key()
+				if len(key) == 3 && key[0] == "profiles" && key[2] == "server" {
+					return nil, errors.New("server is no longer a config field; remove profiles.<name>.server and enter it at login or use --server")
+				}
+			}
+		}
 		// Parser excerpts can contain accidentally supplied passwords or tokens.
 		return nil, errors.New("invalid config: malformed TOML, unknown key, or invalid value type")
 	}

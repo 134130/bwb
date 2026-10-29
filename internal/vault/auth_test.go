@@ -130,6 +130,36 @@ func TestAbandonedReservationExpires(t *testing.T) {
 	})
 }
 
+func TestFailedAuthenticationDoesNotCancelItsRPCReply(t *testing.T) {
+	s := authService(t)
+	synctest.Test(t, func(t *testing.T) {
+		reservation, err := s.BeginAuth(t.Context(), AuthRequest{Profile: "default", Action: "unlock"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		end := AuthEndRequest{Profile: "default", ID: reservation.ID}
+		watching := make(chan AuthWatchResponse, 1)
+		go func() {
+			result, err := s.WatchAuth(t.Context(), end)
+			if err != nil {
+				t.Error(err)
+			}
+			watching <- result
+		}()
+		synctest.Wait()
+		if _, err := s.Unlock(t.Context(), UnlockRequest{Profile: "default", AuthID: reservation.ID, Password: []byte("wrong")}); err == nil {
+			t.Fatal("invalid cached vault unlocked")
+		}
+		synctest.Wait()
+		if result := <-watching; !result.Failed || result.Succeeded {
+			t.Fatal("RPC failure reported as external cancellation", result)
+		}
+		if result, err := s.WatchAuth(t.Context(), end); err != nil || !result.Failed || result.Succeeded {
+			t.Fatal("late watcher lost failed RPC outcome", result, err)
+		}
+	})
+}
+
 func TestAuthRequiredDistinguishesMissingLoginAndLockedCache(t *testing.T) {
 	s := authService(t)
 	for _, name := range []string{"default", "absent"} {

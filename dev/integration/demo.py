@@ -58,10 +58,10 @@ def up():
         profiles = {'owner': manifest['email'], 'restricted': manifest['organizations']['restricted_email']}
         config = 'version = 1\ndefault_profile = "owner"\n'
         for profile, email in profiles.items():
-            config += f'\n[profiles.{profile}]\nserver = {json.dumps(state["url"])}\nemail = {json.dumps(email)}\nlock_timeout = "0s"\n'
+            config += f'\n[profiles.{profile}]\nemail = {json.dumps(email)}\nlock_timeout = "0s"\n'
         (HOME / 'config.toml').write_text(config)
         for profile in profiles:
-            cli(state, '--profile', profile, 'login', '--password-stdin', '--non-interactive',
+            cli(state, '--profile', profile, 'login', '--server', state['url'], '--password-stdin', '--non-interactive',
                 password=manifest['password'] + '\n')
         state['ready'] = True
         save(state)

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -141,15 +142,21 @@ func (s *Service) begin(ctx context.Context, name string, create bool) (context.
 }
 
 func (s *Service) Login(ctx context.Context, req LoginRequest) (Empty, error) {
-	return s.login(ctx, req, nil)
+	return s.login(ctx, req, nil, nil)
 }
 
 func (s *Service) LoginAPIKey(ctx context.Context, req LoginAPIKeyRequest) (Empty, error) {
 	defer clear(req.ClientSecret)
-	return s.login(ctx, req.LoginRequest, &req.APIKey)
+	return s.login(ctx, req.LoginRequest, &req.APIKey, nil)
 }
 
-func (s *Service) login(ctx context.Context, req LoginRequest, apiKey *bitwarden.APIKey) (Empty, error) {
+func (s *Service) LoginSSO(ctx context.Context, req LoginSSORequest) (Empty, error) {
+	defer clear(req.Code)
+	defer clear(req.Verifier)
+	return s.login(ctx, req.LoginRequest, nil, &req.SSOCode)
+}
+
+func (s *Service) login(ctx context.Context, req LoginRequest, apiKey *bitwarden.APIKey, sso *bitwarden.SSOCode) (Empty, error) {
 	defer clear(req.Password)
 	ctx, p, done, err := s.begin(ctx, req.Profile, true)
 	if err != nil {
@@ -167,46 +174,68 @@ func (s *Service) login(ctx context.Context, req LoginRequest, apiKey *bitwarden
 	if saved.Deleting {
 		return Empty{}, errors.New("logout incomplete; retry logout")
 	}
-	if saved.AuthMethod == "apikey" && apiKey == nil {
+	if saved.AuthMethod == "apikey" && apiKey == nil && sso == nil {
 		return Empty{}, s.authRequired(ctx, p, req.Profile, "login")
 	}
-	policy, configured := s.policies[req.Profile]
-	if configured {
-		if req.Server == "" {
-			req.Server = policy.Server
-		}
-		if req.Email == "" {
-			req.Email = policy.Email
-		}
+	if saved.AuthMethod == "sso" && sso == nil {
+		return Empty{}, s.authRequired(ctx, p, req.Profile, "login")
 	}
-	if apiKey != nil && req.Email == "" && saved.Cache != nil {
-		req.Email = saved.Cache.Email
-	}
-	client, err := bitwarden.NewClient(req.Server, req.Email, uuid.NewString())
+	client, err := s.loginClient(req, saved, apiKey != nil || sso != nil)
 	if err != nil {
 		return Empty{}, err
-	}
-	if configured && !client.Matches(&bitwarden.Cache{Server: policy.Server, Email: policy.Email}) {
-		return Empty{}, errors.New("login identity differs from configured profile")
-	}
-	if saved.Cache != nil {
-		if !client.Matches(saved.Cache) {
-			return Empty{}, errors.New("profile identity differs; logout before changing account or server")
-		}
-		client, err = bitwarden.NewClient(saved.Cache.Server, saved.Cache.Email, saved.Cache.DeviceID)
-		if err != nil {
-			return Empty{}, err
-		}
 	}
 	var session *bitwarden.Session
 	if apiKey != nil {
 		session, err = client.LoginAPIKey(ctx, req.Password, *apiKey)
+	} else if sso != nil {
+		session, err = client.LoginSSO(ctx, req.Password, *sso)
 	} else {
 		session, err = client.Login(ctx, req.Password)
 	}
 	if err != nil {
 		return Empty{}, err
 	}
+	return s.installLogin(ctx, p, req, saved, session, apiKey)
+}
+
+func (s *Service) loginClient(req LoginRequest, saved *record, discoverEmail bool) (*bitwarden.Client, error) {
+	policy, configured := s.policies[req.Profile]
+	if configured {
+		if req.Email == "" {
+			req.Email = policy.Email
+		}
+	}
+	if req.Server == "" && saved.Cache != nil {
+		req.Server = saved.Cache.Server
+	}
+	if req.Server == "" {
+		return nil, errors.New("server URL is required for first login; use login --server or run login in a terminal")
+	}
+	if discoverEmail && req.Email == "" && saved.Cache != nil {
+		req.Email = saved.Cache.Email
+	}
+	client, err := bitwarden.NewClient(req.Server, req.Email, uuid.NewString())
+	if err != nil {
+		return nil, err
+	}
+	_, email := client.Identity()
+	if configured && email != policy.Email {
+		return nil, errors.New("login identity differs from configured profile")
+	}
+	if saved.Cache != nil {
+		if !client.Matches(saved.Cache) {
+			return nil, errors.New("profile identity differs; logout before changing account or server")
+		}
+		client, err = bitwarden.NewClient(saved.Cache.Server, saved.Cache.Email, saved.Cache.DeviceID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return client, nil
+}
+
+// installLogin takes ownership of session and publishes only after sync and persistence succeed.
+func (s *Service) installLogin(ctx context.Context, p *profile, req LoginRequest, saved *record, session *bitwarden.Session, apiKey *bitwarden.APIKey) (Empty, error) {
 	defer func() {
 		if session != nil {
 			session.Close()
@@ -214,7 +243,7 @@ func (s *Service) login(ctx context.Context, req LoginRequest, apiKey *bitwarden
 	}()
 	snapshot, err := session.SyncSnapshot(ctx)
 	if err != nil {
-		return Empty{}, err
+		return Empty{}, fmt.Errorf("sync vault after login: %w", err)
 	}
 	cache := session.Cache(snapshot)
 	if saved.Cache != nil && saved.Cache.AccountID() != cache.AccountID() {
@@ -227,7 +256,7 @@ func (s *Service) login(ctx context.Context, req LoginRequest, apiKey *bitwarden
 		auth.ClientID, auth.ClientSecret = apiKey.ClientID, apiKey.ClientSecret
 	}
 	if err := s.saveLogin(ctx, saved, cache, auth); err != nil {
-		return Empty{}, err
+		return Empty{}, fmt.Errorf("save login: %w", err)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -341,10 +370,11 @@ func (s *Service) Sync(ctx context.Context, req ProfileRequest) (Empty, error) {
 		writeCtx = context.WithoutCancel(ctx)
 	}
 	// Also retry a previous credential write failure before reporting success.
-	if saved.AuthMethod == "" {
+	if saved.AuthMethod != "apikey" {
 		if err := s.saveToken(writeCtx, saved, refreshed); err != nil {
 			return Empty{}, errors.Join(syncErr, err)
 		}
+		p.credential = saved.Credential
 	}
 	if syncErr != nil {
 		if errors.Is(syncErr, bitwarden.ErrAuthentication) || errors.Is(syncErr, bitwarden.ErrKeyChanged) {
@@ -439,9 +469,10 @@ func (s *Service) Status(ctx context.Context, req ProfileRequest) (StatusRespons
 	}
 	result := StatusResponse{State: state, LockTimeout: "0s"}
 	if policy, ok := s.policies[req.Profile]; ok {
-		result.Server, result.Email, result.LockTimeout = policy.Server, policy.Email, policy.LockTimeout
+		result.Email, result.LockTimeout = policy.Email, policy.LockTimeout
 		result.InsecureSkipReprompt = policy.InsecureSkipReprompt
-	} else if saved.Cache != nil {
+	}
+	if saved.Cache != nil {
 		result.Server, result.Email = saved.Cache.Server, saved.Cache.Email
 	}
 	s.mu.Lock()

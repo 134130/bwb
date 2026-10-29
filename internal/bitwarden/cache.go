@@ -10,13 +10,15 @@ import (
 
 // Cache contains server ciphertext and public derivation metadata, never tokens or plaintext keys.
 type Cache struct {
-	Version    int          `json:"version"`
-	Server     string       `json:"server"`
-	Email      string       `json:"email"`
-	DeviceID   string       `json:"deviceId"`
-	KDF        int          `json:"kdf"`
-	Iterations int          `json:"iterations"`
-	Snapshot   syncResponse `json:"snapshot"`
+	Version       int          `json:"version"`
+	Server        string       `json:"server"`
+	Email         string       `json:"email"`
+	DeviceID      string       `json:"deviceId"`
+	OAuthClientID string       `json:"oauthClientId,omitempty"`
+	SSOIdentifier string       `json:"ssoIdentifier,omitempty"`
+	KDF           int          `json:"kdf"`
+	Iterations    int          `json:"iterations"`
+	Snapshot      syncResponse `json:"snapshot"`
 }
 
 func (c *Client) Matches(cache *Cache) bool {
@@ -25,12 +27,15 @@ func (c *Client) Matches(cache *Cache) bool {
 
 func (s *Session) Cache(snapshot *Snapshot) *Cache {
 	return &Cache{Version: 1, Server: s.client.server, Email: s.client.email, DeviceID: s.client.deviceID,
-		Iterations: s.iterations, Snapshot: snapshot.response}
+		OAuthClientID: s.oauthClientID, SSOIdentifier: s.ssoIdentifier, Iterations: s.iterations, Snapshot: snapshot.response}
 }
 
 // Unlock validates cached identity and readable contents without accessing the server or credential store.
 func Unlock(ctx context.Context, cache *Cache, password []byte) (*Session, *Snapshot, error) {
 	if cache == nil || cache.Version != 1 || cache.KDF != 0 || cache.Email == "" {
+		return nil, nil, ErrUnsupported
+	}
+	if cache.OAuthClientID != "" && cache.OAuthClientID != "cli" {
 		return nil, nil, ErrUnsupported
 	}
 	if len(password) == 0 || len(password) > 4096 {
@@ -63,7 +68,7 @@ func Unlock(ctx context.Context, cache *Cache, password []byte) (*Session, *Snap
 		return nil, nil, err
 	}
 	session := &Session{client: client, key: memguard.NewBufferFromBytes(key),
-		protectedKey: cache.Snapshot.Profile.Key, iterations: cache.Iterations}
+		oauthClientID: cache.OAuthClientID, ssoIdentifier: cache.SSOIdentifier, protectedKey: cache.Snapshot.Profile.Key, iterations: cache.Iterations}
 	snapshot, _, err := session.validateSnapshot(ctx, cache.Snapshot)
 	if err != nil {
 		session.Close()

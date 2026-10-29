@@ -1,7 +1,10 @@
 package vault
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"os"
 	"strings"
@@ -39,7 +42,13 @@ func (f *faultyCredentials) Get(_ context.Context, key string) ([]byte, error) {
 	}
 	return append([]byte(nil), v...), nil
 }
-func (f *faultyCredentials) Set(_ context.Context, key string, value []byte) error {
+func (f *faultyCredentials) Set(ctx context.Context, key string, value []byte) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if len(value) > 2560 {
+		return secrets.ErrLimit
+	}
 	f.values[key] = append([]byte(nil), value...)
 	if f.afterSet != nil {
 		f.afterSet()
@@ -258,5 +267,130 @@ func TestStaleMemorySessionCannotOverwriteCommittedCredential(t *testing.T) {
 	token.clear()
 	if len(f.values) != 2 {
 		t.Fatal("stale session changed cleanup journal")
+	}
+}
+
+func TestCredentialChunksSurviveRotationAndRestart(t *testing.T) {
+	s, f := persistentService(t)
+	cache := &bitwarden.Cache{Version: 1, Server: "https://example.invalid", Email: "user@example.invalid"}
+	r, _ := s.load(t.Context(), "default")
+	if err := s.saveLogin(t.Context(), r, cache, credential{Token: []byte("legacy")}); err != nil {
+		t.Fatal(err)
+	}
+	for _, token := range []string{strings.Repeat("long-refresh.", 512), strings.Repeat("rotated-refresh.", 1024), "short-again"} {
+		if err := s.saveToken(t.Context(), r, []byte(token)); err != nil {
+			t.Fatal(err)
+		}
+		restored := &Service{Store: s.Store, Secrets: f}
+		var err error
+		r, err = restored.load(t.Context(), "default")
+		if err != nil {
+			t.Fatal(err)
+		}
+		auth, err := restored.loadCredential(t.Context(), r)
+		if err != nil || string(auth.Token) != token {
+			t.Fatal("restored credential differs", err)
+		}
+		auth.clear()
+		encoded, _ := json.Marshal(r)
+		if bytes.Contains(encoded, []byte(token)) || bytes.Contains(encoded, []byte(base64.StdEncoding.EncodeToString([]byte(token)))) {
+			t.Fatal("token was written to cache metadata")
+		}
+		for _, value := range f.values {
+			if len(value) > credentialChunkSize {
+				t.Fatal("native credential limit exceeded")
+			}
+		}
+	}
+	if _, err := s.Logout(t.Context(), ProfileRequest{Profile: "default"}); err != nil || len(f.values) != 0 {
+		t.Fatal("logout retained credential chunks", err)
+	}
+}
+
+func TestPartialCredentialWriteKeepsPreviousTokenAndCleanupJournal(t *testing.T) {
+	for _, cancelWrite := range []bool{false, true} {
+		t.Run(map[bool]string{false: "uncertain native write", true: "canceled write"}[cancelWrite], func(t *testing.T) {
+			s, f := persistentService(t)
+			cache := &bitwarden.Cache{Version: 1, Server: "https://example.invalid", Email: "user@example.invalid"}
+			r, _ := s.load(t.Context(), "default")
+			original := strings.Repeat("original-token.", 512)
+			if err := s.saveLogin(t.Context(), r, cache, credential{Token: []byte(original)}); err != nil {
+				t.Fatal(err)
+			}
+			previous := r.Credential
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			writes := 0
+			f.afterSet = func() {
+				writes++
+				if writes == 2 {
+					if cancelWrite {
+						cancel()
+					} else {
+						f.setErr = secrets.ErrAccess
+					}
+				}
+			}
+			err := s.saveToken(ctx, r, []byte(strings.Repeat("replacement.", 1024)))
+			want := secrets.ErrAccess
+			if cancelWrite {
+				want = context.Canceled
+			}
+			if !errors.Is(err, want) {
+				t.Fatal("partial write unexpectedly succeeded", err)
+			}
+			f.afterSet, f.setErr = nil, nil
+			restored := &Service{Store: s.Store, Secrets: f}
+			r, err = restored.load(t.Context(), "default")
+			if err != nil || r.Credential != previous || len(r.Garbage) != 1 {
+				t.Fatal("partial write lost previous credential or cleanup journal", err)
+			}
+			auth, err := restored.loadCredential(t.Context(), r)
+			if err != nil || string(auth.Token) != original {
+				t.Fatal("partial rotation mixed token generations", err)
+			}
+			auth.clear()
+			if err := restored.saveToken(t.Context(), r, []byte(strings.Repeat("recovered.", 1024))); err != nil {
+				t.Fatal("could not recover failed chunked write", err)
+			}
+			if _, err := restored.Logout(t.Context(), ProfileRequest{Profile: "default"}); err != nil || len(f.values) != 0 {
+				t.Fatal("logout retained abandoned credential chunks", err)
+			}
+		})
+	}
+}
+
+func TestCredentialChunkValidation(t *testing.T) {
+	s, f := persistentService(t)
+	cache := &bitwarden.Cache{Version: 1, Server: "https://example.invalid", Email: "user@example.invalid"}
+	r, _ := s.load(t.Context(), "default")
+	if err := s.saveLogin(t.Context(), r, cache, credential{Token: bytes.Repeat([]byte("x"), maxCredentialSize)}); err == nil || len(f.values) != 0 || len(r.Garbage) != 0 {
+		t.Fatal("oversized credential wrote native values or journal", err)
+	}
+	if err := s.saveLogin(t.Context(), r, cache, credential{Token: bytes.Repeat([]byte("x"), 4096)}); err != nil {
+		t.Fatal(err)
+	}
+	keys, err := credentialKeys(r.Credential)
+	if err != nil || len(keys) < 2 || r.Version != 4 {
+		t.Fatal("large credential not chunked", err)
+	}
+	part := f.values[keys[0]]
+	for _, value := range [][]byte{nil, part[:len(part)-1], append(bytes.Clone(part), 'x')} {
+		f.values[keys[0]] = value
+		if auth, err := s.loadCredential(t.Context(), r); err == nil {
+			auth.clear()
+			t.Fatal("accepted incomplete credential chunk")
+		}
+	}
+	delete(f.values, keys[0])
+	if _, err := s.loadCredential(t.Context(), r); !errors.Is(err, secrets.ErrNotFound) {
+		t.Fatal("missing chunk did not fail", err)
+	}
+	f.values[keys[0]] = part
+	base := r.Credential[:strings.LastIndex(r.Credential, "/")]
+	for _, reference := range []string{"", "default", "default/invalid/2", r.Credential + "/0", base + "/1", base + "/02", base + "/-2", base + "/999999"} {
+		if _, err := credentialKeys(reference); err == nil {
+			t.Fatal("accepted malformed credential reference", reference)
+		}
 	}
 }

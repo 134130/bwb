@@ -40,7 +40,9 @@ type Client struct {
 	http                                   *http.Client
 }
 
-// An empty email is resolved during API key login; password login still requires it.
+func (c *Client) Identity() (server, email string) { return c.server, c.email }
+
+// An empty email is resolved during API key or SSO login; password login still requires it.
 func NewClient(server, email, deviceID string) (*Client, error) {
 	u, err := url.Parse(server)
 	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" || u.ForceQuery {
@@ -96,6 +98,8 @@ type Session struct {
 	key, access, refresh    *memguard.LockedBuffer
 	apiSecret               *memguard.LockedBuffer
 	apiClientID             string
+	oauthClientID           string
+	ssoIdentifier           string
 	protectedKey, accountID string
 	iterations              int
 }
@@ -120,6 +124,7 @@ type tokens struct {
 	KDF                   *int   `json:"Kdf"`
 	Iterations            int    `json:"KdfIterations"`
 	APIUseKeyConnector    bool   `json:"ApiUseKeyConnector"`
+	KeyConnectorURL       string `json:"KeyConnectorUrl"`
 	UserDecryptionOptions *struct {
 		HasMasterPassword *bool `json:"HasMasterPassword"`
 	} `json:"UserDecryptionOptions"`
@@ -195,7 +200,11 @@ func (s *Session) Refresh(ctx context.Context) error {
 	if s.refresh == nil {
 		return ErrAuthentication
 	}
-	form := url.Values{"grant_type": {"refresh_token"}, "client_id": {"web"}, "refresh_token": {string(s.refresh.Bytes())}}
+	clientID := s.oauthClientID
+	if clientID == "" {
+		clientID = "web"
+	}
+	form := url.Values{"grant_type": {"refresh_token"}, "client_id": {clientID}, "refresh_token": {string(s.refresh.Bytes())}}
 	var response tokens
 	if err := s.client.request(ctx, "POST", s.client.identity+"/connect/token", []byte(form.Encode()), true, "", &response); err != nil {
 		var apiErr *APIError

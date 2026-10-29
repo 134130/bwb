@@ -18,7 +18,10 @@ func (e *AuthRequired) Error() string {
 		return "vault locked; run unlock"
 	}
 	if e.Method == "apikey" {
-		return "API key login required; run login --apikey"
+		return "profile uses API key login; run login --apikey, or login --sso for browser SSO"
+	}
+	if e.Method == "sso" {
+		return "SSO login required; run login --sso"
 	}
 	return "login required; run login"
 }

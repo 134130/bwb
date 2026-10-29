@@ -14,7 +14,7 @@ Explore your vault in the terminal. Script it from the CLI.
 ## Usage
 
 ```sh
-bwb login --server https://vault.example.com --email you@example.com
+bwb login                   # Asks for the server URL and email on first login
 bwb tui
 
 bwb item list --search github
@@ -25,8 +25,14 @@ bwb lock
 
 TUI: `/` search · `Tab` switch pane · `v` reveal/hide · `y` copy · `q` quit.
 Personal API Key login: `bwb login --apikey --server https://vault.example.com`.
+`login` checks the email's verified organization domain before asking for a password.
+For Okta / organization SSO, enter your Bitwarden master password first, then complete browser authentication.
+If discovery is unavailable, use `bwb login --sso --server https://vault.example.com --identifier YOUR_ORG`.
+The identifier and email can also be entered in the browser. After a successful login,
+`bwb login --profile work` reuses that profile's server, email, and SSO identifier.
 
-Profiles live in `~/.config/bwb/config.toml` (`XDG_CONFIG_HOME` supported).
+The server URL is set at login and saved with the profile; it is not a config field.
+Profile settings live in `~/.config/bwb/config.toml` (`XDG_CONFIG_HOME` supported).
 Select with `--profile NAME`. Apply edits with `bwb daemon reload`.
 [Example config](dev/config.example.toml) · [Command and behavior reference](docs/reference.md)
 
@@ -42,11 +48,14 @@ flowchart LR
 
 ## Compatibility
 
-macOS / Linux; native credential store required. Password and personal API Key
-login with PBKDF2 accounts. Tested against Vaultwarden snapshots; official
+macOS / Linux; native credential store required. Password, personal API Key, and
+browser SSO login with master-password-protected PBKDF2 accounts. Tested against Vaultwarden snapshots; official
 Bitwarden server interoperability remains unverified.
 
-Not yet supported: Argon2id, SSO/2FA login, or Key Connector. Unofficial client; not affiliated with Bitwarden.
+SSO uses the organization's existing Bitwarden identity-provider integration, including Okta.
+Live Okta SSO interoperability remains unverified.
+Not yet supported: Argon2id, additional Bitwarden two-step login, Key Connector, or passwordless Trusted Device encryption.
+Unofficial client; not affiliated with Bitwarden.
 
 ## Development
 

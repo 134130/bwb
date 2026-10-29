@@ -59,7 +59,7 @@ TUI를 종료해도 환경은 유지된다. Go daemon 코드를 수정했다면 
 - Reprompt 항목의 CLI/TUI 재확인, 잘못된 비밀번호·취소, 항목별 권한과 sync 폐기, `insecure_skip_reprompt`의 profile 격리·명시적 reload.
 - 실제 PTY에서 stdout pipe와 prompt 분리, echo 비활성/복원, 잘못된·긴 비밀번호, Ctrl-C/SIGINT, lock, 동시 CLI의 단일 prompt·취소 전파.
 - refresh 거부 후 자동 재로그인·sync 1회 재시도, 인증 만료 중 cached read 유지, 비대화형·네트워크 장애는 prompt하지 않음.
-- Config 기반 로그인·identity 변경 차단, profile별 자동 잠금과 0s 비활성화, 재시작 후 TOML timeout 재적용, 명시적 reload 전후 정책 분리·잘못된 reload의 기존 정책 유지·잘못된 TOML 중 lock/logout, 만료 후 TTY 자동 unlock을 실제 CLI로 검증한다. 시간·조회 연장·정책 단축·취소·shutdown 경합은 synctest로 검사한다.
+- Config의 이메일·정책과 로그인 시 입력하는 서버·identity 변경 차단, profile별 자동 잠금과 0s 비활성화, 재시작 후 TOML timeout 재적용, 명시적 reload 전후 정책 분리·잘못된 reload의 기존 정책 유지·잘못된 TOML 중 lock/logout, 만료 후 TTY 자동 unlock을 실제 CLI로 검증한다. 시간·조회 연장·정책 단축·취소·shutdown 경합은 synctest로 검사한다.
 - 입력 제한, API redirect 차단·응답 크기·KDF 비용 상한, synctest 기반 작업 취소와 shutdown 검증.
 
 Python runner는 복원된 서버의 URL을 테스트 자식 프로세스에 전달하고 `go test -tags=integration -count=1`을 실행한다. integration 태그 없이 `go test ./...`를 실행하면 Docker 없는 단위 검사만 실행한다. integration 태그가 있는데 서버 URL이 없으면 skip하지 않고 실패한다.
@@ -91,6 +91,8 @@ fixture를 바꾸고 snapshot 재생성을 잊으면 checksum 검사에서 실�
 
 API Key 검증은 복원된 임시 서버에서 테스트 계정의 개인 키를 발급해 실행한다. SQL dump나 manifest에는 API Key를 추가하지 않는다. 이메일 생략 CLI 로그인과 프로필 자동 조회, 401 후 재발급, daemon 재시작 후 keychain 복구, 오프라인 unlock, 폐기된 키의 명시적 재로그인 안내, logout, 실제 PTY의 세 단계 숨김 입력을 검사한다. `testdata/apikey.json`은 단위 테스트용 합성 암호문이며 비밀번호와 API Key는 의도적으로 공개된 테스트 값이다. keychain 장애·계정 불일치·잠금과 자격증명 읽기의 경합은 단위 테스트로 검사한다.
 
+SSO는 모의 인증 서버와 브라우저 opener를 사용해 실제 CLI·daemon·PTY·OS keychain 경로를 검사한다. 도메인 자동 탐색, PKCE, 브라우저 실행 전 비밀번호 입력, 입력·브라우저 대기 중 취소, 오입력 후 브라우저 없이 재시도, profile 로그인 정보 재사용, 재시작 후 `cli` OAuth client의 refresh를 검증한다. 긴 SSO token의 실제 OS keychain 분할 저장·갱신·재시작 복구를 검사하고, 부분 쓰기 실패·취소·누락된 조각·logout 정리는 단위 테스트로 검증한다. 인증 예약의 취소·잠금·로그아웃·만료·동시 대기는 synctest로 검사한다. 실제 Okta/Bitwarden IdP 연동은 별도 검증이 필요하다.
+
 - 상태 조회 integration은 daemon 설정 경로, reload 전후 실제 timeout, 잘못된 TOML 중 조회, verbose 조회의 잠금 시각 불변과 stopped 조회의 무기동을 검사한다.
 
 ## Release와 hook 관리
@@ -108,7 +110,7 @@ Snapshot은 `dist/`에만 생성되며 GitHub에 게시하지 않는다. Native 
 
 정식 게시 진입점은 `mise run release`다. 깨끗한 작업 트리의 `vX.Y.Z` 태그에서 `GITHUB_TOKEN`을 제공하면 게시한다. `vX.Y.Z-rc.1` 같은 태그는 prerelease로 분류한다. `.github/workflows/release.yml`은 `v*` 태그 push에서만 실행되며 macOS runner에 mise 도구를 설치하고 동일한 task를 호출한다. Workflow에 별도 빌드 명령은 없다. 일반 PR/push CI는 추가하지 않는다. Release task는 단위 테스트와 GoReleaser 설정 검사를 먼저 실행한다. Docker·OS keychain을 사용하는 full integration은 기존 로컬 pre-commit에서 계속 실행한다.
 
-TUI 테스트는 `dev/integration/tui.py`에서 실제 controlling PTY와 pyte 화면 해석기를 사용한다. 의존성을 갱신하려면 `.dev/venv/bin/python -m pip install -r dev/integration/requirements.txt`를 실행한다. Snapshot integration마다 검색 tree·상세 표시/숨김·resize·외부 lock·unlock 복귀·Profiles 전환·설정 기반 최초 로그인·reload/logout/재로그인을 검증한다. Master password의 terminal echo 여부도 검사한다. Tree filter·layout 순수성·늦은 응답 폐기는 단위 테스트, background 조회/activity의 idle 경계는 synctest로 검증한다.
+TUI 테스트는 `dev/integration/tui.py`에서 실제 controlling PTY와 pyte 화면 해석기를 사용한다. 의존성을 갱신하려면 `.dev/venv/bin/python -m pip install -r dev/integration/requirements.txt`를 실행한다. Snapshot integration마다 검색 tree·상세 표시/숨김·resize·외부 lock·unlock 복귀·Profiles 전환·서버 입력을 통한 최초 로그인·reload/logout/재로그인을 검증한다. Master password의 terminal echo 여부도 검사한다. Tree filter·layout 순수성·늦은 응답 폐기는 단위 테스트, background 조회/activity의 idle 경계는 synctest로 검증한다.
 
 ## 로컬 go-daemonkit 검증
 

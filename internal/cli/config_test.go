@@ -18,7 +18,6 @@ func TestConfigCommandsAndProfileResolution(t *testing.T) {
 	data := `version = 1
 default_profile = "work"
 [profiles.work]
-server = "https://vault.bitwarden.com"
 email = "user@example.com"
 lock_timeout = "15m"
 `
@@ -42,9 +41,9 @@ lock_timeout = "15m"
 			t.Fatal(tc.args, out.String(), err)
 		}
 	}
-	// Config fills identity before password handling; no daemon/network is needed here.
+	// Noninteractive login without stdin must fail before starting the daemon.
 	root := NewRoot()
-	root.SetArgs([]string{"--config", path, "login", "--password-stdin"})
+	root.SetArgs([]string{"--config", path, "login", "--non-interactive"})
 	root.SetIn(strings.NewReader(""))
 	if err := root.Execute(); err == nil || !strings.Contains(err.Error(), "password") {
 		t.Fatal("configured login identity not applied", err)

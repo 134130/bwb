@@ -12,7 +12,7 @@ import (
 func TestProfilesIncludeConfiguredAndPersistedAccounts(t *testing.T) {
 	s, _ := persistentService(t)
 	defer s.Shutdown(t.Context())
-	policy := config.Profile{Server: "https://example.invalid", Email: "a@example.invalid", LockTimeout: "0s"}
+	policy := config.Profile{Email: "a@example.invalid", LockTimeout: "0s"}
 	if err := s.ApplyConfig(t.Context(), &config.File{Profiles: map[string]config.Profile{"configured": policy}}); err != nil {
 		t.Fatal(err)
 	}
@@ -20,7 +20,7 @@ func TestProfilesIncludeConfiguredAndPersistedAccounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.saveLogin(t.Context(), saved, &bitwarden.Cache{Version: 1, Server: policy.Server, Email: policy.Email}, credential{Token: []byte("token")}); err != nil {
+	if err := s.saveLogin(t.Context(), saved, &bitwarden.Cache{Version: 1, Server: "https://example.invalid", Email: policy.Email}, credential{Token: []byte("token")}); err != nil {
 		t.Fatal(err)
 	}
 	profiles, err := s.Profiles(t.Context(), Empty{})
@@ -33,7 +33,7 @@ func TestProfilesIncludeConfiguredAndPersistedAccounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	reservation, err := s.BeginAuth(t.Context(), AuthRequest{Profile: auth.Profile, Action: auth.Action, Epoch: auth.Epoch, Version: auth.Version})
-	if err != nil || reservation.ID == "" || reservation.Email != policy.Email || reservation.Server != policy.Server {
+	if err != nil || reservation.ID == "" || reservation.Email != policy.Email || reservation.Server != "" {
 		t.Fatal(reservation, err)
 	}
 	if _, err := s.EndAuth(t.Context(), AuthEndRequest{Profile: "configured", ID: reservation.ID}); err != nil {

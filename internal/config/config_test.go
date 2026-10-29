@@ -10,12 +10,10 @@ import (
 const sample = `version = 1
 default_profile = "personal"
 [profiles.personal]
-server = "https://vault.bitwarden.com/"
 email = "USER@example.com"
 lock_timeout = "15m"
 insecure_skip_reprompt = true
 [profiles.work]
-server = "http://localhost:8222"
 email = "work@example.com"
 `
 
@@ -28,7 +26,7 @@ func TestConfigValidationAndSelection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if file.Profiles["personal"].Email != "user@example.com" || file.Profiles["personal"].Server != "https://vault.bitwarden.com" || file.Profiles["personal"].LockTimeout != "15m0s" || file.Profiles["work"].LockTimeout != "0s" {
+	if file.Profiles["personal"].Email != "user@example.com" || file.Profiles["personal"].LockTimeout != "15m0s" || file.Profiles["work"].LockTimeout != "0s" {
 		t.Fatal("config normalization failed")
 	}
 	if !file.Profiles["personal"].InsecureSkipReprompt || file.Profiles["work"].InsecureSkipReprompt {
@@ -52,6 +50,7 @@ func TestConfigValidationAndSelection(t *testing.T) {
 		t.Fatal("legacy profile rejected", err)
 	}
 	for _, bad := range []string{
+		sample + "server = 'https://removed.example.invalid'\n",
 		strings.Replace(sample, "insecure_skip_reprompt = true", `insecure_skip_reprompt = "true"`, 1),
 		strings.Replace(sample, `email = "USER@example.com"`, `email = ""`, 1),
 		strings.Replace(sample, `email = "USER@example.com"`, `email = " "`, 1),
@@ -93,5 +92,16 @@ func TestConfigPathsAndMissingFile(t *testing.T) {
 	}
 	if path, _, err := Path(filepath.Join(base, "flag.toml")); err != nil || filepath.Base(path) != "flag.toml" {
 		t.Fatal(path, err)
+	}
+}
+
+func TestRemovedServerSettingExplainsLoginInput(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte(sample+"server = 'https://DO-NOT-ECHO.example.invalid'\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path, true)
+	if err == nil || !strings.Contains(err.Error(), "server is no longer a config field") || !strings.Contains(err.Error(), "--server") || strings.Contains(err.Error(), "DO-NOT-ECHO") {
+		t.Fatal("removed server setting did not explain migration", err)
 	}
 }

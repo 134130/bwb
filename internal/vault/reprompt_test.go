@@ -48,7 +48,7 @@ func TestRepromptScopedReadAndPolicy(t *testing.T) {
 	if requests.Load() != before {
 		t.Fatal("reprompt contacted server")
 	}
-	policy := &config.File{Version: 1, Profiles: map[string]config.Profile{"default": {Server: login.Server, Email: "apikey@example.invalid", InsecureSkipReprompt: true}}}
+	policy := &config.File{Version: 1, Profiles: map[string]config.Profile{"default": {Email: "apikey@example.invalid", InsecureSkipReprompt: true}}}
 	// Use the canonical identity saved by API key login.
 	status, err := s.Status(t.Context(), ProfileRequest{Profile: "default"})
 	if err != nil {

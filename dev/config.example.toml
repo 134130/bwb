@@ -1,10 +1,10 @@
 # Apply edits with `bwb daemon reload`; failure keeps the running policy.
 # Copy to ~/.config/bwb/config.toml or select with --config. Contains no secrets.
+# Set the server URL at first login: bwb login --profile local --server http://localhost:8222
 version = 1
 default_profile = "local"
 
 [profiles.local]
-server = "http://localhost:8222"
 email = "bwb-demo@example.invalid"
 # Zero means retain unlocked vault keys until explicit lock or daemon exit.
 lock_timeout = "0s"
@@ -12,6 +12,5 @@ lock_timeout = "0s"
 insecure_skip_reprompt = false
 
 [profiles.work]
-server = "https://vault.bitwarden.com"
 email = "developer@example.invalid"
 lock_timeout = "15m"

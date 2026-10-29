@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/134130/bwb/internal/bitwarden"
@@ -44,6 +45,33 @@ func (c *credential) clear() {
 
 const chunkSize = 512 << 10
 const maxChunks = 128
+
+// daemonkit uses the Windows Credential Manager limit on every platform.
+const credentialChunkSize = 2560
+const maxCredentialSize = 64 << 10
+
+func credentialKeys(reference string) ([]string, error) {
+	parts := strings.Split(reference, "/")
+	if len(parts) != 2 && len(parts) != 3 || validProfile(parts[0]) != nil {
+		return nil, errors.New("invalid credential reference")
+	}
+	id, err := uuid.Parse(parts[1])
+	if err != nil || id == uuid.Nil || id.String() != parts[1] {
+		return nil, errors.New("invalid credential reference")
+	}
+	if len(parts) == 2 {
+		return []string{reference}, nil
+	}
+	n, err := strconv.Atoi(parts[2])
+	if err != nil || n < 2 || n > (maxCredentialSize+credentialChunkSize-1)/credentialChunkSize || strconv.Itoa(n) != parts[2] {
+		return nil, errors.New("invalid credential chunk count")
+	}
+	keys := make([]string, n)
+	for i := range keys {
+		keys[i] = reference + "/" + strconv.Itoa(i)
+	}
+	return keys, nil
+}
 
 func count(tx *storage.ReadTx, name string) (int, error) {
 	data, err := tx.Get(name + "/count")
@@ -94,16 +122,19 @@ func (s *Service) load(ctx context.Context, name string) (*record, error) {
 	if json.Unmarshal(data, r) != nil || r.Profile != name || len(r.Garbage) > 4 {
 		return nil, errors.New("invalid profile cache")
 	}
-	if !(r.Version == 1 && r.AuthMethod == "" || r.Version == 2 && r.AuthMethod == "apikey") {
+	if !(r.Version == 1 && r.AuthMethod == "" || r.Version == 2 && r.AuthMethod == "apikey" || r.Version == 3 && r.AuthMethod == "sso" ||
+		r.Version == 4 && (r.AuthMethod == "" || r.AuthMethod == "apikey" || r.AuthMethod == "sso")) {
 		return nil, errors.New("unsupported profile authentication version")
 	}
 	if r.Cache != nil && r.Cache.Version != 1 {
 		return nil, errors.New("unsupported cache version")
 	}
+	if r.Cache != nil && ((r.AuthMethod == "sso") != (r.Cache.OAuthClientID == "cli") || r.Cache.OAuthClientID != "" && r.Cache.OAuthClientID != "cli") {
+		return nil, errors.New("invalid cached OAuth client")
+	}
 	valid := func(key string) bool {
-		suffix, ok := strings.CutPrefix(key, name+"/")
-		id, err := uuid.Parse(suffix)
-		return ok && err == nil && id != uuid.Nil && id.String() == suffix
+		_, err := credentialKeys(key)
+		return strings.HasPrefix(key, name+"/") && err == nil
 	}
 	if (r.Cache == nil) != (r.Credential == "") || (r.Credential != "" && !valid(r.Credential)) {
 		return nil, errors.New("invalid credential binding")
@@ -160,9 +191,15 @@ func (s *Service) cleanup(ctx context.Context, r *record) error {
 	if s.Secrets == nil {
 		return errors.New("credential store unavailable")
 	}
-	for _, key := range r.Garbage {
-		if err := s.Secrets.Delete(ctx, key); err != nil {
+	for _, reference := range r.Garbage {
+		keys, err := credentialKeys(reference)
+		if err != nil {
 			return err
+		}
+		for _, key := range keys {
+			if err := s.Secrets.Delete(ctx, key); err != nil {
+				return err
+			}
 		}
 	}
 	r.Garbage = nil
@@ -173,29 +210,47 @@ func (s *Service) saveLogin(ctx context.Context, r *record, cache *bitwarden.Cac
 	if s.Secrets == nil {
 		return errors.New("credential store unavailable")
 	}
-	if err := s.cleanup(ctx, r); err != nil {
-		return err
-	}
-	key := r.Profile + "/" + uuid.NewString()
-	r.Garbage = append(r.Garbage, key)
-	// Persist the intent before the nontransactional OS write, including uncertain writes.
-	if err := s.put(ctx, r.Profile, r); err != nil {
-		return err
-	}
 	auth.Server, auth.Email, auth.AccountID = cache.Server, cache.Email, cache.AccountID()
 	data, err := json.Marshal(auth)
 	if err != nil {
 		return err
 	}
 	defer clear(data)
-	if err := s.Secrets.Set(ctx, key, data); err != nil {
+	if len(data) > maxCredentialSize {
+		return errors.New("credential exceeds 64 KiB")
+	}
+	if err := s.cleanup(ctx, r); err != nil {
 		return err
+	}
+	key := r.Profile + "/" + uuid.NewString()
+	n := (len(data) + credentialChunkSize - 1) / credentialChunkSize
+	if n > 1 {
+		key += "/" + strconv.Itoa(n)
+	}
+	keys, err := credentialKeys(key)
+	if err != nil {
+		return err
+	}
+	r.Garbage = append(r.Garbage, key)
+	// Persist the intent before the nontransactional OS write, including uncertain writes.
+	if err := s.put(ctx, r.Profile, r); err != nil {
+		return err
+	}
+	for i, part := range keys {
+		if err := s.Secrets.Set(ctx, part, data[i*credentialChunkSize:min((i+1)*credentialChunkSize, len(data))]); err != nil {
+			return err
+		}
 	}
 	old := r.Credential
 	r.Cache, r.Credential, r.Garbage = cache, key, nil
 	r.Version, r.AuthMethod = 1, ""
 	if auth.ClientID != "" {
 		r.Version, r.AuthMethod = 2, "apikey"
+	} else if cache.OAuthClientID == "cli" {
+		r.Version, r.AuthMethod = 3, "sso"
+	}
+	if n > 1 {
+		r.Version = 4
 	}
 	if old != "" {
 		r.Garbage = []string{old}
@@ -208,11 +263,25 @@ func (s *Service) loadCredential(ctx context.Context, r *record) (credential, er
 	if s.Secrets == nil {
 		return credential{}, errors.New("credential store unavailable")
 	}
-	data, err := s.Secrets.Get(ctx, r.Credential)
+	keys, err := credentialKeys(r.Credential)
 	if err != nil {
 		return credential{}, err
 	}
-	defer clear(data)
+	data := make([]byte, 0, min(len(keys)*credentialChunkSize, maxCredentialSize))
+	defer func() { clear(data) }()
+	for i, key := range keys {
+		part, err := s.Secrets.Get(ctx, key)
+		if err != nil {
+			clear(part)
+			return credential{}, err
+		}
+		if len(part) == 0 || len(part) > credentialChunkSize || i < len(keys)-1 && len(part) != credentialChunkSize || len(data)+len(part) > maxCredentialSize {
+			clear(part)
+			return credential{}, errors.New("invalid credential chunk size")
+		}
+		data = append(data, part...)
+		clear(part)
+	}
 	var c credential
 	if json.Unmarshal(data, &c) != nil {
 		c.clear()
@@ -231,16 +300,25 @@ func (s *Service) loadCredential(ctx context.Context, r *record) (credential, er
 }
 
 func (s *Service) saveToken(ctx context.Context, r *record, token []byte) error {
-	if r.AuthMethod != "" || len(token) == 0 {
+	if (r.AuthMethod != "" && r.AuthMethod != "sso") || len(token) == 0 {
 		return errors.New("invalid refresh token credential")
 	}
 	if s.Secrets == nil {
 		return errors.New("credential store unavailable")
 	}
-	data, err := json.Marshal(credential{Server: r.Cache.Server, Email: r.Cache.Email, AccountID: r.Cache.AccountID(), Token: token})
+	auth := credential{Server: r.Cache.Server, Email: r.Cache.Email, AccountID: r.Cache.AccountID(), Token: token}
+	data, err := json.Marshal(auth)
 	if err != nil {
 		return err
 	}
 	defer clear(data)
+	keys, err := credentialKeys(r.Credential)
+	if err != nil {
+		return err
+	}
+	// Publish a new reference only after every part is written; never mix token generations.
+	if len(keys) > 1 || len(data) > credentialChunkSize {
+		return s.saveLogin(ctx, r, r.Cache, auth)
+	}
 	return s.Secrets.Set(ctx, r.Credential, data)
 }

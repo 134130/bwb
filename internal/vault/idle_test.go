@@ -128,7 +128,7 @@ func TestConfigReloadBindingAndLogout(t *testing.T) {
 	s, _ := persistentService(t)
 	defer s.Shutdown(context.Background())
 	ctx := context.Background()
-	policy := config.Profile{Server: "https://example.invalid", Email: "test@example.invalid", LockTimeout: "15m"}
+	policy := config.Profile{Email: "test@example.invalid", LockTimeout: "15m"}
 	if err := s.ApplyConfig(ctx, &config.File{Profiles: map[string]config.Profile{"default": policy}}); err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestConfigReloadBindingAndLogout(t *testing.T) {
 	if s.policies["default"].LockTimeout != "15m0s" {
 		t.Fatal("policy not applied")
 	}
-	cache := &bitwarden.Cache{Version: 1, Server: policy.Server, Email: policy.Email}
+	cache := &bitwarden.Cache{Version: 1, Server: "https://example.invalid", Email: policy.Email}
 	if err := s.saveLogin(ctx, saved, cache, credential{Token: []byte("token")}); err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +222,7 @@ func TestReloadIsAtomicAndCancellationLeavesPolicyUnchanged(t *testing.T) {
 	s, _ := persistentService(t)
 	defer s.Shutdown(context.Background())
 	ctx := context.Background()
-	policy := config.Profile{Server: "https://example.invalid", Email: "test@example.invalid", LockTimeout: "15m"}
+	policy := config.Profile{Email: "test@example.invalid", LockTimeout: "15m"}
 	initial := &config.File{Profiles: map[string]config.Profile{"a": policy, "b": policy}}
 	if err := s.ApplyConfig(ctx, initial); err != nil {
 		t.Fatal(err)
@@ -231,7 +231,7 @@ func TestReloadIsAtomicAndCancellationLeavesPolicyUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.saveLogin(ctx, saved, &bitwarden.Cache{Version: 1, Server: policy.Server, Email: policy.Email}, credential{Token: []byte("token")}); err != nil {
+	if err := s.saveLogin(ctx, saved, &bitwarden.Cache{Version: 1, Server: "https://example.invalid", Email: policy.Email}, credential{Token: []byte("token")}); err != nil {
 		t.Fatal(err)
 	}
 	shorter := policy
@@ -283,7 +283,7 @@ func TestReloadDoesNotPreventLockCancellation(t *testing.T) {
 func TestStatusReportsAppliedPolicyWithoutRenewingDeadline(t *testing.T) {
 	s, _ := persistentService(t)
 	defer s.Shutdown(context.Background())
-	policy := config.Profile{Server: "https://example.invalid", Email: "test@example.invalid", LockTimeout: "15m"}
+	policy := config.Profile{Email: "test@example.invalid", LockTimeout: "15m"}
 	if err := s.ApplyConfig(t.Context(), &config.File{Profiles: map[string]config.Profile{"default": policy}}); err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +291,7 @@ func TestStatusReportsAppliedPolicyWithoutRenewingDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.saveLogin(t.Context(), saved, &bitwarden.Cache{Version: 1, Server: policy.Server, Email: policy.Email}, credential{Token: []byte("token")}); err != nil {
+	if err := s.saveLogin(t.Context(), saved, &bitwarden.Cache{Version: 1, Server: "https://example.invalid", Email: policy.Email}, credential{Token: []byte("token")}); err != nil {
 		t.Fatal(err)
 	}
 	p := idleProfile(t, s, "default", "15m")
@@ -302,7 +302,7 @@ func TestStatusReportsAppliedPolicyWithoutRenewingDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.State != "unlocked" || status.Server != policy.Server || status.Email != policy.Email || status.LockTimeout != "15m0s" || status.LockAt != deadline.UTC().Format(time.RFC3339Nano) {
+	if status.State != "unlocked" || status.Server != "https://example.invalid" || status.Email != policy.Email || status.LockTimeout != "15m0s" || status.LockAt != deadline.UTC().Format(time.RFC3339Nano) {
 		t.Fatal(status)
 	}
 	s.mu.Lock()
@@ -378,7 +378,7 @@ func TestReloadInvalidFileKeepsAppliedConfig(t *testing.T) {
 		}
 	}()
 	path := filepath.Join(t.TempDir(), "config.toml")
-	if err := os.WriteFile(path, []byte("version = 1\n[profiles.default]\nserver = 'https://example.invalid'\nemail = 'test@example.invalid'\nlock_timeout = '15m'\n"), 0600); err != nil {
+	if err := os.WriteFile(path, []byte("version = 1\n[profiles.default]\nemail = 'test@example.invalid'\nlock_timeout = '15m'\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.ReloadConfig(t.Context(), path); err != nil {

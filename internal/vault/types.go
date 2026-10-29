@@ -16,6 +16,10 @@ type LoginAPIKeyRequest struct {
 	LoginRequest
 	bitwarden.APIKey
 }
+type LoginSSORequest struct {
+	LoginRequest
+	bitwarden.SSOCode
+}
 type UnlockRequest struct {
 	Profile  string `json:"profile"`
 	Password []byte `json:"password"`

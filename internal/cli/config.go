@@ -90,12 +90,12 @@ func configCommands() (*cobra.Command, *cobra.Command) {
 	write := func(cmd *cobra.Command, names []string) error {
 		state, _ := cmd.Context().Value(configKey{}).(commandConfig)
 		table := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
-		if _, err := fmt.Fprintln(table, "NAME\tSERVER\tEMAIL\tLOCK_TIMEOUT"); err != nil {
+		if _, err := fmt.Fprintln(table, "NAME\tEMAIL\tLOCK_TIMEOUT"); err != nil {
 			return err
 		}
 		for _, name := range names {
 			p := state.file.Profiles[name]
-			if _, err := fmt.Fprintf(table, "%s\t%s\t%s\t%s\n", display(name), display(p.Server), display(p.Email), p.LockTimeout); err != nil {
+			if _, err := fmt.Fprintf(table, "%s\t%s\t%s\n", display(name), display(p.Email), p.LockTimeout); err != nil {
 				return err
 			}
 		}

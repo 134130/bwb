@@ -83,6 +83,9 @@ def main():
     signal.alarm(55)
     try:
         resize(120, 34)
+        if scenario == 'login':
+            until(lambda: 'Server URL:' in view())
+            send(os.environ['BWB_TEST_SERVER'] + '\r')
         until(lambda: 'Password:' in view())
         if scenario == 'cancel':
             send('\x1b')
@@ -138,6 +141,8 @@ def main():
                 send('y')
                 until(lambda: 'State: logged_out' in view())
                 send('u')
+                until(lambda: 'Server URL:' in view())
+                send(os.environ['BWB_TEST_SERVER'] + '\r')
                 until(lambda: 'Password:' in view())
                 send(password + '\r')
                 until(lambda: 'GitHub (demo)' in view())

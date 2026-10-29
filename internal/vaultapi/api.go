@@ -22,6 +22,11 @@ type NamedID = vault.NamedID
 type ProfileRequest = vault.ProfileRequest
 type LoginRequest = vault.LoginRequest
 type LoginAPIKeyRequest = vault.LoginAPIKeyRequest
+type LoginSSORequest = vault.LoginSSORequest
+type LoginPlanRequest = vault.LoginPlanRequest
+type LoginPlanResponse = vault.LoginPlanResponse
+type ExchangeSSORequest = vault.ExchangeSSORequest
+type FinishSSOResponse = vault.FinishSSOResponse
 type UnlockRequest = vault.UnlockRequest
 type ReadRequest = vault.ReadRequest
 type Empty = vault.Empty
@@ -59,6 +64,7 @@ type AuthEndRequest = vault.AuthEndRequest
 type AuthWatchResponse = vault.AuthWatchResponse
 
 const AuthTimeout = vault.AuthTimeout
+const SSOTimeout = vault.SSOTimeout
 
 var (
 	Reprompt      = daemon.NewMethod[RepromptRequest, RepromptResponse]("vault.reprompt")
@@ -77,6 +83,10 @@ var (
 	Logout        = daemon.NewMethod[ProfileRequest, Empty]("vault.logout")
 	Login         = daemon.NewMethod[LoginRequest, Empty]("vault.login")
 	LoginAPIKey   = daemon.NewMethod[LoginAPIKeyRequest, Empty]("vault.loginApiKey")
+	LoginSSO      = daemon.NewMethod[LoginSSORequest, Empty]("vault.loginSSO")
+	PlanLogin     = daemon.NewMethod[LoginPlanRequest, LoginPlanResponse]("vault.planLogin")
+	ExchangeSSO   = daemon.NewMethod[ExchangeSSORequest, AuthResponse]("vault.exchangeSSO")
+	FinishSSO     = daemon.NewMethod[UnlockRequest, FinishSSOResponse]("vault.finishSSO")
 	Read          = daemon.NewMethod[ReadRequest, ReadResponse]("vault.read")
 	Item          = daemon.NewMethod[ItemRequest, ItemResponse]("vault.item")
 	Sync          = daemon.NewMethod[ProfileRequest, Empty]("vault.sync")
