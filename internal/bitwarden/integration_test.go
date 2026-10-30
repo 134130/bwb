@@ -14,18 +14,26 @@ import (
 	"time"
 )
 
+type snapshotManifest struct {
+	Email, Password string
+	AccountID       string `json:"account_id"`
+	Items, Folders  map[string]string
+	Organizations   organizationManifest
+	Argon2id        *snapshotManifest
+}
+
 func TestSnapshotIntegration(t *testing.T) {
+	var manifest snapshotManifest
+	loadJSON(t, "../../testdata/integration/manifest.json", &manifest)
+	t.Run("PBKDF2", func(t *testing.T) { testSnapshot(t, manifest) })
+	t.Run("Argon2id", func(t *testing.T) { testSnapshot(t, *manifest.Argon2id) })
+}
+
+func testSnapshot(t *testing.T, manifest snapshotManifest) {
 	server := os.Getenv("BWB_INTEGRATION_URL")
 	if server == "" {
-		t.Fatal("run through dev/integration/run.py; a disposable server is required")
+		t.Fatal("run through dev/integration/run.py")
 	}
-	var manifest struct {
-		Email, Password string
-		AccountID       string `json:"account_id"`
-		Items, Folders  map[string]string
-		Organizations   organizationManifest
-	}
-	loadJSON(t, "../../testdata/integration/manifest.json", &manifest)
 	var fixture struct {
 		Items   []map[string]any
 		Folders []Folder
@@ -47,6 +55,9 @@ func TestSnapshotIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer session.Close()
+	if err := session.VerifyPassword(ctx, []byte("wrong password")); err == nil {
+		t.Fatal("wrong reprompt password accepted")
+	}
 	if err := session.Refresh(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -165,6 +176,21 @@ func TestSnapshotIntegration(t *testing.T) {
 			}
 		}
 	}
+	if manifest.Argon2id == nil {
+		apiKey := APIKey{ClientID: "user." + manifest.AccountID, ClientSecret: []byte(os.Getenv("BWB_INTEGRATION_ARGON_CLIENTSECRET"))}
+		apiClient, _ := NewClient(server, "", testDevice)
+		apiSession, err := apiClient.LoginAPIKey(ctx, []byte(manifest.Password), apiKey)
+		if err != nil {
+			t.Fatal("Argon2 API key login", err)
+		}
+		defer apiSession.Close()
+		if err := apiSession.Refresh(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := apiSession.SyncSnapshot(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
 	encoded, err := json.Marshal(session.Cache(snapshot))
 	if err != nil {
 		t.Fatal(err)
@@ -192,7 +218,9 @@ func TestSnapshotIntegration(t *testing.T) {
 	unlocked.Close()
 	for _, mutate := range []func(*Cache){
 		func(c *Cache) { c.Version++ },
-		func(c *Cache) { c.KDF = 1 },
+		func(c *Cache) { c.KDF = 99 },
+		func(c *Cache) { c.KDF = 1; c.Iterations = 3; c.Memory = 0; c.Parallelism = 4 },
+		func(c *Cache) { c.KDF = 1; c.Iterations = 3; c.Memory = 64; c.Parallelism = 0 },
 		func(c *Cache) { c.Iterations = 2147483647 },
 		func(c *Cache) { c.Email = "other@example.invalid" },
 		func(c *Cache) { c.Email = "" },

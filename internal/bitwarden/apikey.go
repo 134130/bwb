@@ -54,14 +54,11 @@ func (c *Client) apiToken(ctx context.Context, apiKey APIKey) (tokens, error) {
 	if response.KDF == nil {
 		return tokens{}, fmt.Errorf("API key token response is missing Kdf: %w", ErrUnsupported)
 	}
-	if *response.KDF != 0 {
-		return tokens{}, fmt.Errorf("API key token response Kdf=%d (only PBKDF2 is supported): %w", *response.KDF, ErrUnsupported)
-	}
 	if response.Key == "" {
 		return tokens{}, fmt.Errorf("API key token response is missing the protected vault key: %w", ErrUnsupported)
 	}
-	if response.Iterations < 100000 || response.Iterations > 2000000 {
-		return tokens{}, errors.New("PBKDF2 iterations must be between 100000 and 2000000")
+	if err := response.kdfConfig().validate(); err != nil {
+		return tokens{}, err
 	}
 	// API key sessions renew using client credentials, without depending on a refresh token.
 	response.Refresh = ""
@@ -92,7 +89,7 @@ func (c *Client) LoginAPIKey(ctx context.Context, password []byte, apiKey APIKey
 		resolved.email = email
 		c = &resolved
 	}
-	stretched, _, err := derive(c.email, password, response.Iterations)
+	stretched, _, err := derive(ctx, c.email, password, response.kdfConfig())
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +97,7 @@ func (c *Client) LoginAPIKey(ctx context.Context, password []byte, apiKey APIKey
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	session, err := c.openSession(stretched, response.Iterations, response)
+	session, err := c.openSession(stretched, response.kdfConfig(), response)
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +134,7 @@ func (s *Session) refreshAPIKey(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if response.Key != s.protectedKey || response.Iterations != s.iterations {
+	if response.Key != s.protectedKey || response.kdfConfig() != s.kdf {
 		return ErrKeyChanged
 	}
 	if s.access != nil {

@@ -2,6 +2,7 @@
 
 - `vaultwarden.sql`: 실제 Vaultwarden API로 등록·암호화 저장한 계정과 vault의 SQLite logical dump.
 - `manifest.json`: 서버 image digest, 공개 테스트 자격정보, fixture ID→서버 ID, 타입 목록, dump/fixture SHA-256.
+- `../argon2id.json`: 별도 Argon2id 계정의 KDF 설정. 개인 8종 fixture를 동일하게 저장한다.
 - `../organizations.json`: 두 조직의 collection·항목·제한 계정 기대값.
 - `../bitwarden.json`: 복호화 결과의 기대값. 서버 응답 mock이 아니다.
 
@@ -20,7 +21,7 @@
 | 7 | driversLicense | 이름/생년월일/면허번호/발급·만료일 등 |
 | 8 | passport | 여권번호/국적/발급국/생년월일/발급·만료일 등 |
 
-21 items (15 personal + 6 organization), 2 folders, 2 organizations, 4 collections (2 per organization), 2 accounts (owner + restricted member), PBKDF2-SHA256 600000 iterations, AES-CBC-256 + HMAC-SHA256 (`2.` cipher string).
+36 items (owner: 15 personal + 6 organization, Argon2id: 15 personal), 4 personal folders, 2 organizations, 4 collections (2 per organization), 3 accounts (owner + restricted member + Argon2id). PBKDF2-SHA256 600000 iterations; Argon2id 3 iterations / 64 MiB / parallelism 4. AES-CBC-256 + HMAC-SHA256 (`2.` cipher string).
 
 타입 목록 근거: [Bitwarden CipherType](https://github.com/bitwarden/clients/blob/c0ca72a0c83cc8b7f990138ac04961cf63d985bc/libs/common/src/vault/enums/cipher-type.ts).
 추가 타입 필드는 같은 revision의 `libs/common/src/vault/models/data/`를 확인했다.
@@ -34,3 +35,5 @@
 조직 fixture는 조직 간 동명 collection, 한 항목의 collection 두 개 소속, folder와 collection 동시 소속, 선택적 item key를 포함한다. 제한 계정은 첫 collection에서 hide-password, 두 번째에서 read-only 권한을 가진다. 다중 소속의 유효 viewPassword는 서버 응답과 대조하며 실제 멤버 권한 회수 후 sync에서 항목이 사라지는지 검사하고 권한을 복원한다. 매 복원에서 Python 암호화 교차 검증과 Go API/CLI 검증을 모두 수행한다.
 
 Reprompt fixture: 개인 login 두 개에 `reprompt=1`; 첫 항목은 TOTP 포함. 실제 CLI/TUI 재입력·오답·취소, item별 capability·sync 무효화, profile별 skip/reload를 검증한다.
+
+Argon2id도 매 restore에서 8종 복호화, 비밀번호/API Key 로그인, 갱신, daemon 재시작 후 HTTP 없는 unlock·reprompt, CLI/TUI 재입력을 검사한다. KDF 비용은 [Bitwarden 설정 범위](https://github.com/bitwarden/clients/blob/bf0ba4a04d1f0e48ebfab91c2563198c46467b3d/libs/legacy-crypto/src/models/kdf-config.ts)를 따른다.

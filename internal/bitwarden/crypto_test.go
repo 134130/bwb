@@ -2,6 +2,7 @@ package bitwarden
 
 import (
 	"bytes"
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/hmac"
@@ -18,7 +19,7 @@ import (
 
 // Golden values were generated independently by the Python snapshot builder.
 func TestDeriveGolden(t *testing.T) {
-	key, hash, err := derive("bwb-integration@example.invalid", []byte("PUBLIC-INTEGRATION-ONLY-not-a-real-password!"), 600000)
+	key, hash, err := derive(context.Background(), "bwb-integration@example.invalid", []byte("PUBLIC-INTEGRATION-ONLY-not-a-real-password!"), kdfConfig{Iterations: 600000})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +28,7 @@ func TestDeriveGolden(t *testing.T) {
 		t.Fatal("KDF mismatch")
 	}
 	for _, iterations := range []int{-1, 0, 99999, 2000001} {
-		if _, _, err := derive("user@example.invalid", []byte("password"), iterations); err == nil {
+		if _, _, err := derive(context.Background(), "user@example.invalid", []byte("password"), kdfConfig{Iterations: iterations}); err == nil {
 			t.Fatalf("accepted iterations %d", iterations)
 		}
 	}

@@ -36,6 +36,21 @@ class DemoTest(unittest.TestCase):
                 self.assertNotIn('BWB_PROFILE', env)
                 self.assertNotIn('BWB_CLIENTSECRET', env)
 
+    def test_down_logs_out_all_configured_profiles(self):
+        for profiles in (('owner', 'restricted'), ('owner', 'restricted', 'argon2id')):
+            with tempfile.TemporaryDirectory() as directory:
+                home = Path(directory) / 'demo'
+                home.mkdir()
+                state = home / 'environment.json'
+                state.write_text(json.dumps({'container': 'test-container'}))
+                (home / 'config.toml').write_text('\n'.join(f'[profiles.{p}]' for p in profiles))
+                with patch.object(demo, 'HOME', home), patch.object(demo, 'STATE', state), \
+                        patch.object(demo, 'cli') as cli, patch.object(run, 'docker', return_value=''), patch('builtins.print'):
+                    demo.down()
+                    self.assertEqual([call.args[1:] for call in cli.call_args_list],
+                                     [('--profile', p, 'logout', '--non-interactive') for p in profiles] + [('daemon', 'stop')])
+                    self.assertFalse(home.exists())
+
     def test_failed_logout_retains_cleanup_state(self):
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory)

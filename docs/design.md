@@ -8,7 +8,7 @@ CLI와 TUI가 go-daemonkit 기반 daemon을 공유하고, daemon이 Bitwarden Pa
 
 핵심은 **서버 로그인과 로컬 vault unlock의 분리**다. 명령은 필요한 상태만 확보하고 이어서 실행한다. 반복 조회는 네트워크와 외부 프로세스 실행 없이 처리한다.
 
-첫 범위는 macOS/Linux, 개인·조직 vault 읽기, 자체 로그인/로그아웃, unlock/lock, sync, 목록/상세/필드 조회, 읽기 전용 TUI다. master-password 로그인과 PBKDF2/Argon2id, TOTP 2FA를 검증 대상으로 한다. 조직 vault/collection 읽기는 목록 구현의 선행 작업이다. SSO/WebAuthn, 조직·collection 관리, 편집, attachments, SSH agent, 환경 주입은 후속이다. 지원하지 않는 인증·키·암호문 형식은 명시적 오류로 처리한다.
+첫 범위는 macOS/Linux, 개인·조직 vault 읽기, 자체 로그인/로그아웃, unlock/lock, sync, 목록/상세/필드 조회, 읽기 전용 TUI다. master-password 로그인과 PBKDF2/Argon2id, TOTP 2FA를 검증 대상으로 한다. 조직 vault/collection 읽기는 목록 구현의 선행 작업이다. WebAuthn, 조직·collection 관리, 편집, attachments, SSH agent, 환경 주입은 후속이다. 지원하지 않는 인증·키·암호문 형식은 명시적 오류로 처리한다.
 
 Full integration은 실제 서버의 인증·동기화·복호화·조회·재인증을 통과하는 것이다. 버전 관리된 필수 SQL dump snapshot을 매번 독립 서버에 복원하고 Lefthook pre-commit에서 매 커밋마다 검증한다. 수동/선택적 import와 HTTP mock만으로 완료를 선언하지 않는다.
 
@@ -29,7 +29,7 @@ Full integration은 실제 서버의 인증·동기화·복호화·조회·재�
 
 refresh token과 개인 API Key는 daemonkit `app.Secrets()`를 사용한다. plaintext 파일 fallback은 없다. credential store 사용 불가 시 로그인 저장에 실패했음을 알리고 완료로 보고하지 않는다. access token·refresh token·API Key는 vault 복호화 키가 아니다. 보호된 키와 암호문은 비밀의 평문과 구분한다.
 
-이 저장 정책은 재로그인 없이 재시작 후 refresh하고, 오프라인에서도 비밀번호로 cached vault를 unlock하기 위한 것이다. rbw의 token JSON 저장 대신 이미 사용 중인 daemonkit의 OS credential store를 재사용한다. 명시적 `login --apikey`는 개인 `client_id`·`client_secret`을 저장하고, refresh token 없이 `client_credentials` grant로 재발급한다. 첫 로그인에서 마스터 비밀번호로 복호화와 sync를 검증한 뒤 저장한다. API Key profile은 인증 방식을 포함한 v2 레코드를 사용하며 기존 비밀번호 profile의 v1 레코드를 계속 읽는다. 키가 폐기되면 명시적 API Key 재로그인을 요구하고 자동 비밀번호 로그인으로 전환하지 않는다. Key Connector·마스터 비밀번호 없는 계정·Argon2id는 이 인증 경로에서 지원하지 않는다.
+이 저장 정책은 재로그인 없이 재시작 후 refresh하고, 오프라인에서도 비밀번호로 cached vault를 unlock하기 위한 것이다. rbw의 token JSON 저장 대신 이미 사용 중인 daemonkit의 OS credential store를 재사용한다. 명시적 `login --apikey`는 개인 `client_id`·`client_secret`을 저장하고, refresh token 없이 `client_credentials` grant로 재발급한다. 첫 로그인에서 마스터 비밀번호로 복호화와 sync를 검증한 뒤 저장한다. API Key profile은 인증 방식을 포함한 v2 레코드를 사용하며 기존 비밀번호 profile의 v1 레코드를 계속 읽는다. 키가 폐기되면 명시적 API Key 재로그인을 요구하고 자동 비밀번호 로그인으로 전환하지 않는다. Key Connector·마스터 비밀번호 없는 계정은 이 인증 경로에서 지원하지 않는다.
 
 `lock`은 로컬 비밀 접근을 막는다. `logout`은 lock + 로컬 인증 자료 및 cached vault 제거다. 둘 다 이미 출력된 값이나 다른 장치의 세션을 회수하지 않는다. 서버 token 폐기는 해당 서버가 지원하고 검증된 경우에만 별도 동작으로 명시한다.
 
@@ -194,7 +194,7 @@ CLI / TUI ─ typed local RPC ─ vault service
 - DB/config/log/argv에 plaintext 비밀번호·복호화 키·token·API Key·vault 값 없음. refresh token과 API Key의 영속 저장은 OS credential store만 사용. logout 뒤 cache/credential 접근 불가.
 - 중복 이름, 빈 값, Unicode, 여러 줄 notes, hidden field, card/identity 기본 마스킹, RPC 크기 초과.
 
-현재 Go API의 login/refresh/sync/8종 복호화와 Cobra → daemon RPC를 snapshot 서버에서 검증한다. profile별 키·토큰은 memguard locked memory, snapshot은 암호문으로 메모리에 유지한다. read는 HTTP 없이 동작하며 lock/shutdown은 진행 중 작업을 취소하고 세션을 파기한다. 임시 crypto/HTTP/RPC 평문 복사본까지 완전히 zeroize하지는 않는다. `main.go`는 root, 패키지는 `cli`, `vaultapi`, `daemon`, `vault`, `bitwarden`으로 나눈다. keychain refresh token과 SQLite 암호화 cache 저장, HTTP 없는 unlock, 로컬 logout을 구현했다. `lock`은 메모리만 파기하고 재시작 후 비밀번호로 unlock한다. SQLite/keychain 간 작업은 credential 정리 목록으로 복구하며, logout 실패 시 표시를 저장하고 unlock을 막는다. CLI 공통 실행부의 인증 후 원래 read/list/sync 1회 재시도까지 구현했다. 서비스의 AuthRequired/ErrStateChanged는 daemon에서 RPC 코드로 바꾸며 일반 장애는 그대로 전달한다. 자동 인증 예약은 연결 감시·취소·lock 및 2분 만료로 정리하고, 대기자는 prompt를 중복 생성하지 않는다. Argon2id·2FA는 후속이다. 테스트는 전용 서버·계정만 사용한다.
+현재 Go API의 login/refresh/sync/8종 복호화와 Cobra → daemon RPC를 snapshot 서버에서 검증한다. profile별 키·토큰은 memguard locked memory, snapshot은 암호문으로 메모리에 유지한다. read는 HTTP 없이 동작하며 lock/shutdown은 진행 중 작업을 취소하고 세션을 파기한다. 임시 crypto/HTTP/RPC 평문 복사본까지 완전히 zeroize하지는 않는다. `main.go`는 root, 패키지는 `cli`, `vaultapi`, `daemon`, `vault`, `bitwarden`으로 나눈다. keychain refresh token과 SQLite 암호화 cache 저장, HTTP 없는 unlock, 로컬 logout을 구현했다. `lock`은 메모리만 파기하고 재시작 후 비밀번호로 unlock한다. SQLite/keychain 간 작업은 credential 정리 목록으로 복구하며, logout 실패 시 표시를 저장하고 unlock을 막는다. CLI 공통 실행부의 인증 후 원래 read/list/sync 1회 재시도까지 구현했다. 서비스의 AuthRequired/ErrStateChanged는 daemon에서 RPC 코드로 바꾸며 일반 장애는 그대로 전달한다. 자동 인증 예약은 연결 감시·취소·lock 및 2분 만료로 정리하고, 대기자는 prompt를 중복 생성하지 않는다. PBKDF2·Argon2id는 공통 KDF 경로로 login/API Key login/SSO/offline unlock/reprompt를 지원하며 2FA는 후속이다. 테스트는 전용 서버·계정만 사용한다.
 
 ## 9. 참고한 인터페이스와 근거
 

@@ -64,7 +64,7 @@ TUI를 종료해도 환경은 유지된다. Go daemon 코드를 수정했다면 
 
 Python runner는 복원된 서버의 URL을 테스트 자식 프로세스에 전달하고 `go test -tags=integration -count=1`을 실행한다. integration 태그 없이 `go test ./...`를 실행하면 Docker 없는 단위 검사만 실행한다. integration 태그가 있는데 서버 URL이 없으면 skip하지 않고 실패한다.
 
-Python crypto helper는 snapshot 생성과 복원된 데이터의 독립 교차 검증에 사용한다. Go 제품 API와 CLI integration도 매번 실행한다. 공유 서버의 권한 변경 테스트 때문에 패키지는 `-p=1`로 순차 실행하고, 서로 다른 runner 실행은 독립 서버를 사용한다. CLI 테스트는 임시 state 경로와 고유 `BWB_INSTANCE`에 daemon을 실행한다. 정상 종료 시 각 profile을 logout해 전용 keychain 항목을 지우고 daemon/state를 정리한다. 강제 종료 시 해당 instance의 `logout`으로 남은 credential 정리 목록을 처리할 수 있다. 키·토큰은 memguard로 보관하며 명시적 파기는 단위 테스트로 검사한다. TUI·Argon2id·2FA·첨부파일은 후속이다. 현재 offline read는 살아 있는 세션이나 저장된 cache를 비밀번호로 unlock한 뒤 지원한다. 네이티브 keychain 경로는 실제 integration으로 검사한다. 장애 복구 단위 테스트와 서버 앞 proxy의 refresh 거부/연결 장애만 의도적으로 실패를 주입하며 로그인·sync·암호문은 실제 서버를 사용한다. `terminal.py`는 실제 바이너리의 TTY 동작을 검증하는 테스트 도구다.
+Python crypto helper는 snapshot 생성과 복원된 데이터의 독립 교차 검증에 사용한다. Go 제품 API와 CLI integration도 매번 실행한다. 공유 서버의 권한 변경 테스트 때문에 패키지는 `-p=1`로 순차 실행하고, 서로 다른 runner 실행은 독립 서버를 사용한다. CLI 테스트는 임시 state 경로와 고유 `BWB_INSTANCE`에 daemon을 실행한다. 정상 종료 시 각 profile을 logout해 전용 keychain 항목을 지우고 daemon/state를 정리한다. 강제 종료 시 해당 instance의 `logout`으로 남은 credential 정리 목록을 처리할 수 있다. 키·토큰은 memguard로 보관하며 명시적 파기는 단위 테스트로 검사한다. 2FA·첨부파일은 후속이다. 현재 offline read는 살아 있는 세션이나 저장된 cache를 비밀번호로 unlock한 뒤 지원한다. 네이티브 keychain 경로는 실제 integration으로 검사한다. 장애 복구 단위 테스트와 서버 앞 proxy의 refresh 거부/연결 장애만 의도적으로 실패를 주입하며 로그인·sync·암호문은 실제 서버를 사용한다. `terminal.py`는 실제 바이너리의 TTY 동작을 검증하는 테스트 도구다.
 
 ## 데이터 / 타입 추가
 
@@ -76,7 +76,7 @@ Python crypto helper는 snapshot 생성과 복원된 데이터의 독립 교차 
    .dev/venv/bin/python dev/integration/run.py --rebuild
    ```
 
-4. `bitwarden.json`, `organizations.json`, SQL dump, manifest를 함께 리뷰한다. 기존 타입을 제거하거나 실패 케이스를 건너뛰어 테스트를 통과시키지 않는다. snapshot 포맷/서버 버전 변경은 migration 호환성을 확인하고 manifest version을 갱신한다.
+4. `bitwarden.json`, `organizations.json`, `argon2id.json`, SQL dump, manifest를 함께 리뷰한다. 기존 타입을 제거하거나 실패 케이스를 건너뛰어 테스트를 통과시키지 않는다. snapshot 포맷/서버 버전 변경은 migration 호환성을 확인하고 manifest version을 갱신한다.
 5. 일반 integration을 두 번 실행해 각 fresh restore가 통과하는지 확인한다. 단위 검사도 실행한 뒤 fixture·dump·manifest를 함께 커밋한다.
 
 fixture를 바꾸고 snapshot 재생성을 잊으면 checksum 검사에서 실패한다. normal test는 기준 dump를 수정하지 않는다. 재생성은 안전한 난수 키/IV와 서버 UUID/시간을 사용하므로 byte-identical하지 않지만, 커밋된 dump의 매번 복원은 같은 계정·ID·값을 보장한다.
@@ -131,3 +131,5 @@ mise run integration
 launch 환경은 기존처럼 상속하되 `BWB_CONFIG`를 자식 환경에서만 교체한다.
 환경 원문을 journal에 저장하지 않으며 다른 launcher의 crash recovery까지 복원하지 않는다.
 reload는 파일 읽기부터 정책 publication까지 직렬화하고, 오류·commit 전 취소에는 기존 정책을 유지한다.
+
+`dev:up`은 `owner`, `restricted`, `argon2id` profile을 준비한다. Argon2id 화면은 `mise r dev:run -- --profile argon2id tui`로 확인한다. 기존 dev 환경은 snapshot 변경 후 `dev:down` → `dev:up`으로 다시 준비한다.

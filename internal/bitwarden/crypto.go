@@ -1,6 +1,7 @@
 package bitwarden
 
 import (
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/hkdf"
@@ -10,6 +11,8 @@ import (
 	"encoding/base64"
 	"errors"
 	"strings"
+
+	"golang.org/x/crypto/argon2"
 )
 
 var (
@@ -17,16 +20,61 @@ var (
 	ErrCipher      = errors.New("invalid or unauthenticated ciphertext")
 )
 
-// derive supports PBKDF2 accounts only. The bound limits work requested by a server.
-func derive(email string, password []byte, iterations int) ([]byte, string, error) {
-	if iterations < 100000 || iterations > 2000000 {
-		return nil, "", errors.New("PBKDF2 iterations must be between 100000 and 2000000")
+type kdfConfig struct {
+	Type, Iterations, Memory, Parallelism int
+}
+
+func (k kdfConfig) validate() error {
+	switch k.Type {
+	case 0:
+		if k.Iterations < 100000 || k.Iterations > 2000000 {
+			return errors.New("PBKDF2 iterations must be between 100000 and 2000000")
+		}
+	case 1:
+		if k.Iterations < 2 || k.Iterations > 10 || k.Memory < 16 || k.Memory > 1024 || k.Parallelism < 1 || k.Parallelism > 16 {
+			return errors.New("Argon2id requires 2–10 iterations, 16–1024 MiB memory and 1–16 parallelism")
+		}
+	default:
+		return ErrUnsupported
 	}
-	master, err := pbkdf2.Key(sha256.New, string(password), []byte(email), iterations, 32)
-	if err != nil {
+	return nil
+}
+
+// Serialize memory-heavy derivations across profiles; waiting remains cancellable.
+var argonWork = make(chan struct{}, 1)
+
+func derive(ctx context.Context, email string, password []byte, kdf kdfConfig) ([]byte, string, error) {
+	if err := kdf.validate(); err != nil {
 		return nil, "", err
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, "", err
+	}
+	var master []byte
+	var err error
+	if kdf.Type == 1 {
+		select {
+		case argonWork <- struct{}{}:
+		case <-ctx.Done():
+			return nil, "", ctx.Err()
+		}
+		defer func() { <-argonWork }()
+		if err := ctx.Err(); err != nil {
+			return nil, "", err
+		}
+		salt := sha256.Sum256([]byte(email))
+		// IDKey cannot be interrupted; observe cancellation immediately after computation.
+		master = argon2.IDKey(password, salt[:], uint32(kdf.Iterations), uint32(kdf.Memory)*1024, uint8(kdf.Parallelism), 32)
+	} else {
+		master, err = pbkdf2.Key(sha256.New, string(password), []byte(email), kdf.Iterations, 32)
+		if err != nil {
+			return nil, "", err
+		}
+	}
 	defer clear(master)
+	if err := ctx.Err(); err != nil {
+		return nil, "", err
+	}
 	enc, err := hkdf.Expand(sha256.New, master, "enc", 32)
 	if err != nil {
 		return nil, "", err

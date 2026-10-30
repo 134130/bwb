@@ -96,7 +96,7 @@ API Key 환경변수는 `--apikey`일 때만 읽고, daemon 시작 전에 현재
 
 keychain에는 서버·이메일·계정 ID에 묶인 `client_id`와 `client_secret`을 저장한다. 메모리의 secret은 `memguard`로 보호하며 lock/종료 시 파기한다. unlock은 오프라인으로 가능하고, 다음 sync에서 keychain의 API Key로 재인증한다. 키가 폐기되면 `login --apikey`를 안내하며 비밀번호 로그인으로 전환하지 않는다. cached read는 계속 가능하다. logout은 로컬 키를 삭제하며 서버의 API Key 자체는 폐기하지 않는다.
 
-마스터 비밀번호가 있는 PBKDF2 계정만 지원한다. Key Connector·마스터 비밀번호 없는 계정·Argon2id는 지원하지 않는다. 실행 중인 구 daemon은 `daemon update`로 갱신해야 한다. API Key profile은 v2 레코드를 사용해 구 바이너리가 거부하며, 기존 비밀번호 profile의 v1 레코드는 계속 읽는다. 구 버전으로 내리려면 새 버전에서 API Key profile을 먼저 logout한다.
+마스터 비밀번호가 있는 PBKDF2·Argon2id 계정을 지원한다. Key Connector·마스터 비밀번호 없는 계정은 지원하지 않는다. 실행 중인 구 daemon은 `daemon update`로 갱신해야 한다. API Key profile은 v2 레코드를 사용해 구 바이너리가 거부하며, 기존 비밀번호 profile의 v1 레코드는 계속 읽는다. 구 버전으로 내리려면 새 버전에서 API Key profile을 먼저 logout한다.
 
 ### Okta / 조직 SSO 로그인
 
@@ -122,7 +122,7 @@ Vaultwarden의 고정 더미 identifier는 SSO 활성 여부를 뜻하지 않으
 
 마스터 비밀번호는 로컬 금고 복호화에만 사용한다. 로그인·복호화·첫 sync가 모두 성공해야 기존 keychain/cache 저장 흐름으로 반영한다. SSO refresh token은 keychain에 저장하고, 재시작 후에도 `cli` OAuth client로 갱신한다. unlock은 오프라인으로 가능하다. SSO 세션이 만료되면 `login --sso`를 안내하며 비밀번호 로그인으로 전환하지 않는다. TUI에서는 로그인 후 기존 profile을 선택해 사용한다.
 
-마스터 비밀번호가 있는 PBKDF2 계정을 지원한다. Key Connector, 마스터 비밀번호 없는 Trusted Device 계정, Argon2id, Okta 인증 이후 Bitwarden 자체가 추가로 요구하는 two-step login은 지원하지 않는다. 실제 Okta/Bitwarden 서버 연동은 아직 검증하지 않았으며, 모의 서버로 코드 교환·계정 검증·토큰 갱신·실패 복구를 검사한다. SSO profile은 v3 레코드, 분할 credential은 v4 레코드로 구 daemon의 오해석을 막는다. 새 바이너리에서 `bwb daemon update`를 실행하고, SSO 미지원 버전으로 내리기 전에는 해당 profile을 logout한다.
+마스터 비밀번호가 있는 PBKDF2·Argon2id 계정을 지원한다. Key Connector, 마스터 비밀번호 없는 Trusted Device 계정, Okta 인증 이후 Bitwarden 자체가 추가로 요구하는 two-step login은 지원하지 않는다. 실제 Okta/Bitwarden 서버 연동은 아직 검증하지 않았으며, 모의 서버로 코드 교환·계정 검증·토큰 갱신·실패 복구를 검사한다. SSO profile은 v3 레코드, 분할 credential은 v4 레코드로 구 daemon의 오해석을 막는다. 새 바이너리에서 `bwb daemon update`를 실행하고, SSO 미지원 버전으로 내리기 전에는 해당 profile을 logout한다.
 
 ```text
 main.go → internal/cli (Cobra + 인증 실행부)
@@ -136,14 +136,16 @@ main.go → internal/cli (Cobra + 인증 실행부)
 
 키와 access/refresh token의 장기 보관은 `memguard` locked memory를 사용한다. 평문 snapshot은 보관하지 않는다. crypto·HTTP·JSON·RPC 처리 중 임시 Go 문자열/버퍼는 생기며 모든 복사본의 즉시 zeroize를 보장하지 않는다. 메모리 보호 실패 시 평문 fallback은 없다. 같은 OS 사용자 프로세스는 daemon 접근 가능하다. daemonkit SQLite에는 암호화 vault와 계정 metadata만 기록하며 비밀번호·token은 넣지 않는다. cache record는 512 KiB 단위로 원자적으로 저장하며 최대 64 MiB다. Credential JSON은 최대 64 KiB이며, 2,560바이트를 넘으면 여러 OS keychain 항목으로 나눠 저장한다. 토큰 갱신은 새 조각을 모두 저장한 뒤 참조를 바꾸고, 미완료 쓰기와 이전 조각은 정리 목록으로 복구한다. 기존 단일 항목도 계속 읽으며 logout은 모든 조각을 삭제한다. 분할 credential이 있는 profile은 구 버전으로 내리기 전에 logout한다. Unix 경로는 `XDG_STATE_HOME`, 실행·keychain namespace는 `BWB_INSTANCE`로 격리한다. 테스트는 둘 모두 독립 값으로 설정한다.
 
-지원 범위는 PBKDF2(100000–2000000 iterations), 개인·조직 vault, AES-CBC/HMAC `2.` 암호문, 8종의 기본 필드다. 마스터 비밀번호 재확인(reprompt) 항목도 login/sync/offline unlock과 이름 목록은 지원한다. 필드 조회는 항목별 마스터 비밀번호 재확인 후 허용한다. SSO는 위의 마스터 비밀번호 기반 흐름을 지원하며, Argon2id, Bitwarden 자체의 추가 two-step login, passkey는 아직 지원하지 않는다. 공식 Bitwarden 서버와의 상호운용성은 별도 검증이 필요하다.
+지원 범위는 PBKDF2(100000–2000000 iterations), Argon2id(2–10 iterations, 16–1024 MiB, parallelism 1–16), 개인·조직 vault, AES-CBC/HMAC `2.` 암호문, 8종의 기본 필드다. 마스터 비밀번호 재확인(reprompt) 항목도 login/sync/offline unlock과 이름 목록은 지원한다. 필드 조회는 항목별 마스터 비밀번호 재확인 후 허용한다. SSO는 위의 마스터 비밀번호 기반 흐름을 지원하며, Bitwarden 자체의 추가 two-step login, passkey는 아직 지원하지 않는다. 공식 Bitwarden 서버와의 상호운용성은 별도 검증이 필요하다.
+
+KDF 설정은 계정의 서버 응답을 따르며 TOML에서 덮어쓰지 않는다. 암호문 cache에 KDF 종류·비용을 함께 저장해 offline unlock과 reprompt에 사용한다. 기존 PBKDF2 cache v1은 그대로 읽으며, 구 바이너리는 Argon2id cache를 거부한다. Argon2id 계산은 프로세스당 하나씩 실행한다. 대기는 즉시 취소되지만 진행 중 계산의 취소는 계산 완료 후 반영된다. Argon2id 작업 메모리는 Go heap이며 memguard 보호 대상이 아니다.
 
 ```sh
 go test ./...
 mise run integration
 ```
 
-integration은 실제 Vaultwarden에서 Go API 코드와 빌드된 CLI·daemon을 실행해 snapshot 기대값, profile 격리, offline read/unlock의 HTTP 0회, lock 중 로그인 취소, 재시작 후 keychain refresh, logout 영속성을 검사한다. 실제 PTY로 비밀 비노출·취소·동시 prompt 억제·자동 재로그인도 확인한다. Python은 서버 복원과 snapshot 생성에만 쓰며 제품의 암호화 구현은 Go 표준 라이브러리를 사용한다.
+integration은 실제 Vaultwarden에서 Go API 코드와 빌드된 CLI·daemon을 실행해 snapshot 기대값, profile 격리, offline read/unlock의 HTTP 0회, lock 중 로그인 취소, 재시작 후 keychain refresh, logout 영속성을 검사한다. 실제 PTY로 비밀 비노출·취소·동시 prompt 억제·자동 재로그인도 확인한다. Python은 서버 복원과 snapshot 생성에만 쓰며 제품의 암호화 구현은 Go 표준 라이브러리와 `golang.org/x/crypto/argon2`를 사용한다.
 
 조직 vault는 RSA-OAEP SHA-1/SHA-256(`4.`/`3.`)으로 감싼 조직 키와 선택적 item key를 지원한다. 조직·collection 소속과 권한은 암호화 cache에 보존하며 재시작 후 offline unlock/read가 가능하다. 조직 키는 작업 중 보호 메모리에서 사용한 뒤 파기하고, RSA private key 파싱 중 Go 임시 할당의 즉시 zeroize는 보장하지 않는다. `viewPassword=false` 항목은 현재 이름만 읽을 수 있고 나머지 필드는 명시적 제한 오류다. Collection 권한을 합산하지 않고 서버가 계산한 항목 권한을 사용한다. 이 제한은 클라이언트 정책이며 서버가 암호문·키를 제공하는 사용자의 다른 프로그램까지 막는 보안 경계는 아니다. 조직/collection 관리는 아직 없다.
 

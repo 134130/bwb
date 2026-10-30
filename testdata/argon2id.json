@@ -1,0 +1,4 @@
+{
+  "email": "bwb-argon2id@example.invalid",
+  "kdf": {"type": 1, "iterations": 3, "memory": 64, "parallelism": 4}
+}

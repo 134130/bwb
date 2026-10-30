@@ -22,6 +22,7 @@ from cryptography.hazmat.primitives import hashes, padding, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, padding as asymmetric_padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDFExpand
+from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
 
 ROOT = Path(__file__).resolve().parents[2]
 SNAPSHOT = ROOT / 'testdata/integration'
@@ -42,8 +43,13 @@ def b64(value):
     return base64.b64encode(value).decode()
 
 
-def master_keys(email=EMAIL, password=PASSWORD):
-    master = hashlib.pbkdf2_hmac('sha256', password.encode(), email.encode(), ITERATIONS)
+def master_keys(email=EMAIL, password=PASSWORD, kdf=None):
+    if kdf and kdf['type'] == 1:
+        master = Argon2id(salt=hashlib.sha256(email.encode()).digest(), length=32,
+                         iterations=kdf['iterations'], memory_cost=kdf['memory'] * 1024,
+                         lanes=kdf['parallelism']).derive(password.encode())
+    else:
+        master = hashlib.pbkdf2_hmac('sha256', password.encode(), email.encode(), ITERATIONS)
     stretched = b''.join(HKDFExpand(algorithm=hashes.SHA256(), length=32, info=info).derive(master)
                          for info in (b'enc', b'mac'))
     password_hash = b64(hashlib.pbkdf2_hmac('sha256', master, password.encode(), 1))
@@ -145,17 +151,19 @@ class Server:
             'deviceName': 'bwb-integration'}, form=True)
 
 
-def seed(server):
+def seed(server, email=EMAIL, kdf=None):
+    kdf = kdf or {'type': 0, 'iterations': ITERATIONS}
     data = fixture()
-    master, password_hash = master_keys()
+    master, password_hash = master_keys(email, kdf=kdf)
     user_key = os.urandom(64)
     verification = server.request('POST', '/identity/accounts/register/send-verification-email',
-                                  {'email': EMAIL, 'name': 'BWB integration'})
+                                  {'email': email, 'name': 'BWB integration'})
     server.request('POST', '/identity/accounts/register/finish', {
         'emailVerificationToken': verification,
-        'email': EMAIL, 'masterPasswordHash': password_hash,
-        'key': encrypt(user_key, master), 'kdf': 0, 'kdfIterations': ITERATIONS})
-    auth = server.login()
+        'email': email, 'masterPasswordHash': password_hash,
+        'key': encrypt(user_key, master), 'kdf': kdf['type'], 'kdfIterations': kdf['iterations'],
+        'kdfMemory': kdf.get('memory'), 'kdfParallelism': kdf.get('parallelism')})
+    auth = server.login(password_hash, email)
     token = auth['access_token']
     sync = server.request('GET', '/api/sync', token=token)
     account_id = sync['profile']['id']
@@ -173,9 +181,9 @@ def seed(server):
             payload[field] = transform(item[field], lambda s: encrypt(s.encode(), user_key))
         result = server.request('POST', '/api/ciphers', payload, token)
         items[item['id']] = result['id']
-    organizations = seed_organizations(server, token, user_key, account_id, folders)
-    return {'organizations': organizations, 'version': 1, 'image': IMAGE, 'email': EMAIL, 'password': PASSWORD,
-            'kdf': {'type': 0, 'iterations': ITERATIONS}, 'account_id': account_id,
+    organizations = seed_organizations(server, token, user_key, account_id, folders) if email == EMAIL else None
+    return {'organizations': organizations, 'version': 1, 'image': IMAGE, 'email': email, 'password': PASSWORD,
+            'kdf': kdf, 'account_id': account_id,
             'folders': folders, 'items': items,
             'types': {str(k): v for k, v in TYPES.items()}}
 
@@ -279,16 +287,20 @@ def verify_organizations(server, manifest, owner_sync, owner_key):
 
 
 def verify(server, manifest):
-    prelogin = server.request('POST', '/identity/accounts/prelogin', {'email': EMAIL})
-    require(prelogin['kdf'] == 0 and prelogin['kdfIterations'] == ITERATIONS, 'KDF mismatch')
+    email, kdf = manifest['email'], manifest['kdf']
+    master, password_hash = master_keys(email, kdf=kdf)
+    prelogin = server.request('POST', '/identity/accounts/prelogin', {'email': email})
+    require(prelogin['kdf'] == kdf['type'] and prelogin['kdfIterations'] == kdf['iterations'], 'KDF mismatch')
+    if kdf['type'] == 1:
+        require(prelogin['kdfMemory'] == kdf['memory'] and prelogin['kdfParallelism'] == kdf['parallelism'], 'Argon2 parameters mismatch')
     try:
-        server.login('invalid-password-hash')
+        server.login('invalid-password-hash', email)
     except urllib.error.HTTPError as e:
         require(e.code in (400, 401), 'unexpected wrong-password response')
     else:
         raise AssertionError('wrong password accepted')
-    auth = server.login()
-    key = decrypt(auth['Key'] if 'Key' in auth else auth['key'], master_keys()[0])
+    auth = server.login(password_hash, email)
+    key = decrypt(auth['Key'] if 'Key' in auth else auth['key'], master)
     require(len(key) == 64, 'invalid user key')
     refreshed = server.request('POST', '/identity/connect/token', {
         'grant_type': 'refresh_token', 'client_id': 'web',
@@ -297,7 +309,7 @@ def verify(server, manifest):
     require(sync['profile']['id'] == manifest['account_id'], 'account changed')
     data = fixture()
     actual = {x['id']: x for x in sync['ciphers']}
-    require(set(actual) == set(manifest['items'].values()) | {i['id'] for o in manifest['organizations']['entries'] for i in o['items']}, 'item IDs/count changed')
+    require(set(actual) == set(manifest['items'].values()) | {i['id'] for o in (manifest['organizations'] or {}).get('entries', []) for i in o['items']}, 'item IDs/count changed')
     require({x['type'] for x in actual.values()} == set(TYPES), 'missing cipher type')
     folders = {x['id']: decrypt(x['name'], key).decode() for x in sync['folders']}
     require(folders == {manifest['folders'][x['id']]: x['name'] for x in data['folders']},
@@ -311,7 +323,10 @@ def verify(server, manifest):
             got = transform(item[field], lambda s: decrypt(s, key).decode())
             # Server may add optional null/default fields; all fixture fields must survive.
             compare(expected[field], got, f'{expected["id"]}/{field}')
-    verify_organizations(server, manifest, sync, key)
+    if manifest['organizations']:
+        verify_organizations(server, manifest, sync, key)
+    if 'argon2id' in manifest:
+        verify(server, manifest['argon2id'])
     print(f'PASS: real login, bad password, refresh, sync, decrypt; {len(actual)} items; types 1–8')
 
 
@@ -336,6 +351,7 @@ def snapshot_manifest():
     require(manifest['fixture_sha256'] == digest(ROOT / 'testdata/bitwarden.json'),
             'fixture changed: rebuild and review snapshot')
     require(manifest['organizations_sha256'] == digest(ROOT / 'testdata/organizations.json'), 'organization fixture changed: rebuild snapshot')
+    require(manifest['argon2id_sha256'] == digest(ROOT / 'testdata/argon2id.json'), 'Argon2 fixture changed: rebuild snapshot')
     return manifest
 
 
@@ -356,11 +372,14 @@ def main():
         if args.rebuild:
             with Server(directory) as server:
                 manifest = seed(server)
+                argon = json.loads((ROOT / 'testdata/argon2id.json').read_text())
+                manifest['argon2id'] = seed(server, argon['email'], argon['kdf'])
                 verify(server, manifest)
             with sqlite3.connect(db_path) as db:
                 sql = '\n'.join(db.iterdump()) + '\n'
             dump = SNAPSHOT / 'vaultwarden.sql'
             dump.write_text(sql)
+            manifest['argon2id_sha256'] = digest(ROOT / 'testdata/argon2id.json')
             manifest['dump_sha256'] = digest(dump)
             manifest['fixture_sha256'] = digest(ROOT / 'testdata/bitwarden.json')
             manifest['organizations_sha256'] = digest(ROOT / 'testdata/organizations.json')
@@ -373,13 +392,19 @@ def main():
                 auth = server.login()
                 api_key = server.request('POST', '/api/accounts/api-key',
                                          {'masterPasswordHash': master_keys()[1]}, auth['access_token'])
+                argon = manifest['argon2id']
+                argon_hash = master_keys(argon['email'], kdf=argon['kdf'])[1]
+                argon_auth = server.login(argon_hash, argon['email'])
+                argon_key = server.request('POST', '/api/accounts/api-key',
+                    {'masterPasswordHash': argon_hash}, argon_auth['access_token'])
                 subprocess.run(
                     # Packages share a server; membership mutation tests restore before CLI tests.
                     ['go', 'test', '-p=1', '-tags=integration', '-count=1', '-v',
                      './internal/bitwarden', './internal/cli'],
                     cwd=ROOT, env={**os.environ, 'BWB_INTEGRATION_URL': server.url,
                                    'BWB_INTEGRATION_CLIENTID': 'user.' + manifest['account_id'],
-                                   'BWB_INTEGRATION_CLIENTSECRET': api_key['apiKey']}, check=True)
+                                   'BWB_INTEGRATION_CLIENTSECRET': api_key['apiKey'],
+                                   'BWB_INTEGRATION_ARGON_CLIENTSECRET': argon_key['apiKey']}, check=True)
 
 
 if __name__ == '__main__':

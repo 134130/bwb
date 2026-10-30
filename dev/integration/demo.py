@@ -5,6 +5,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tomllib
 import uuid
 
 import run
@@ -55,7 +56,7 @@ def up():
     if not state.get('url'):
         raise RuntimeError('Incomplete setup; run mise r dev:down, then mise r dev:up')
     if not state['ready']:
-        profiles = {'owner': manifest['email'], 'restricted': manifest['organizations']['restricted_email']}
+        profiles = {'owner': manifest['email'], 'restricted': manifest['organizations']['restricted_email'], 'argon2id': manifest['argon2id']['email']}
         config = 'version = 1\ndefault_profile = "owner"\n'
         for profile, email in profiles.items():
             config += f'\n[profiles.{profile}]\nemail = {json.dumps(email)}\nlock_timeout = "0s"\n'
@@ -80,7 +81,7 @@ def down():
     state = json.loads(STATE.read_text())
     # Keep state on cleanup failure so native credentials remain recoverable.
     if (HOME / 'config.toml').exists():
-        for profile in ('owner', 'restricted'):
+        for profile in tomllib.loads((HOME / 'config.toml').read_text()).get('profiles', {}):
             cli(state, '--profile', profile, 'logout', '--non-interactive')
         cli(state, 'daemon', 'stop')
     containers = run.docker('ps', '-aq', '--filter', 'name=^/' + state['container'] + '$')

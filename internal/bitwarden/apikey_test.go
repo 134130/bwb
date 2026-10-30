@@ -220,7 +220,7 @@ func TestAPIKeyRejectsInvalidResponsesAndCredentials(t *testing.T) {
 	}{
 		{"missing token", func(m map[string]any) { delete(m, "access_token") }, "incomplete API key login response"},
 		{"missing KDF", func(m map[string]any) { delete(m, "Kdf") }, "missing Kdf"},
-		{"argon2", func(m map[string]any) { m["Kdf"] = 1 }, "Kdf=1"},
+		{"argon2", func(m map[string]any) { m["Kdf"] = 1 }, "Argon2id requires"},
 		{"excessive KDF", func(m map[string]any) { m["KdfIterations"] = 2000001 }, "PBKDF2 iterations"},
 		{"missing key", func(m map[string]any) { delete(m, "Key") }, "missing the protected vault key"},
 		{"invalid key", func(m map[string]any) { m["Key"] = "2.invalid" }, "decrypt protected vault key"},

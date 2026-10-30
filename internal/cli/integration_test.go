@@ -39,7 +39,12 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	var manifest struct {
 		Email, Password string
 		Items           map[string]string
-		Organizations   struct {
+		Argon2id        struct {
+			Email     string
+			AccountID string `json:"account_id"`
+			Items     map[string]string
+		}
+		Organizations struct {
 			RestrictedEmail string `json:"restricted_email"`
 			Entries         []struct{ Items []struct{ ID string } }
 		}
@@ -133,7 +138,12 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 		command := exec.CommandContext(ctx, binary, args...)
 		command.Env = append(os.Environ(), "XDG_STATE_HOME="+state, "BWB_INSTANCE="+instance)
 		if slices.Contains(args, "--apikey") {
-			command.Env = append(command.Env, "BWB_CLIENTID="+os.Getenv("BWB_INTEGRATION_CLIENTID"), "BWB_CLIENTSECRET="+os.Getenv("BWB_INTEGRATION_CLIENTSECRET"))
+			clientID, secret := os.Getenv("BWB_INTEGRATION_CLIENTID"), os.Getenv("BWB_INTEGRATION_CLIENTSECRET")
+			if slices.Contains(args, "argon2id") {
+				clientID = "user." + manifest.Argon2id.AccountID
+				secret = os.Getenv("BWB_INTEGRATION_ARGON_CLIENTSECRET")
+			}
+			command.Env = append(command.Env, "BWB_CLIENTID="+clientID, "BWB_CLIENTSECRET="+secret)
 		}
 		command.Stdin = strings.NewReader(password)
 		var stdout, stderr bytes.Buffer
@@ -155,7 +165,7 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 		}
 	}
 	defer func() {
-		for _, profile := range []string{"default", "other", "restricted", "timed", "steady", "api", "fresh"} {
+		for _, profile := range []string{"default", "other", "restricted", "timed", "steady", "api", "fresh", "argon2id"} {
 			if output, err := run("", "--profile", profile, "logout"); err != nil {
 				t.Errorf("credential cleanup: %v %s", err, output)
 			}
@@ -441,6 +451,40 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 		}
 	}
 	terminal("setup", "", "--profile", "fresh", "login")
+	// Both KDF profiles share a daemon but retain independent keys/cache/credentials.
+	argonID := manifest.Argon2id.Items["20000000-0000-4000-8000-000000000001"]
+	argonProtected := manifest.Argon2id.Items["20000000-0000-4000-8000-000000000014"]
+	for _, api := range []bool{false, true} {
+		args := []string{"--profile", "argon2id", "login", "--server", endpoint.URL, "--email", manifest.Argon2id.Email, "--password-stdin"}
+		if api {
+			args = append(args, "--apikey")
+		}
+		must(manifest.Password+"\n", "", args...)
+		must("", "DEMO-only-password-1!", "--profile", "argon2id", "item", "read", argonID, "--field", "password")
+		if _, err := run("", "item", "read", argonID, "--field", "password"); err == nil {
+			t.Fatal("Argon2 item crossed profiles")
+		}
+		must("", "", "daemon", "stop")
+		offline.Store(true)
+		before := requests.Load()
+		if _, err := run("wrong\n", "--profile", "argon2id", "unlock", "--password-stdin"); err == nil {
+			t.Fatal("Argon2 wrong password unlocked cache")
+		}
+		must(manifest.Password+"\n", "", "--profile", "argon2id", "unlock", "--password-stdin")
+		must("", "DEMO-only-password-1!", "--profile", "argon2id", "item", "read", argonID, "--field", "password")
+		terminal("success", "DEMO-reprompt-password!", "--profile", "argon2id", "item", "read", argonProtected, "--field", "password")
+		if requests.Load() != before {
+			t.Fatal("Argon2 offline unlock/reprompt contacted server")
+		}
+		offline.Store(false)
+		must("", "", "--profile", "argon2id", "sync")
+		if !api {
+			must("", "", "--profile", "argon2id", "lock")
+			tuiTerminal("reprompt", "--profile", "argon2id", "tui")
+		}
+		must("", "", "--profile", "argon2id", "logout")
+		must(manifest.Password+"\n", "", "unlock", "--password-stdin")
+	}
 	must("", "", "lock")
 	tuiTerminal("cancel")
 	tuiTerminal("explorer")
@@ -620,8 +664,10 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 		deadline := time.Now().Add(5 * time.Second)
 		for time.Now().Before(deadline) {
 			output, err := run("", "--profile", "timed", "status")
-			if err != nil {
-				t.Fatal(err, output)
+			// Expiry cancels in-flight reads and invalidates queued admissions.
+			transient := strings.Contains(output, "RPC error -32800: request canceled") || strings.Contains(output, "vault state changed; retry the command")
+			if err != nil && !transient {
+				t.Fatalf("status while waiting for lock: %v: %s", err, output)
 			}
 			if output == "locked\n" {
 				return

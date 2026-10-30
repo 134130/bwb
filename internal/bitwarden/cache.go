@@ -10,14 +10,16 @@ import (
 
 // Cache contains server ciphertext and public derivation metadata, never tokens or plaintext keys.
 type Cache struct {
+	OAuthClientID string       `json:"oauthClientId,omitempty"`
+	SSOIdentifier string       `json:"ssoIdentifier,omitempty"`
 	Version       int          `json:"version"`
 	Server        string       `json:"server"`
 	Email         string       `json:"email"`
 	DeviceID      string       `json:"deviceId"`
-	OAuthClientID string       `json:"oauthClientId,omitempty"`
-	SSOIdentifier string       `json:"ssoIdentifier,omitempty"`
 	KDF           int          `json:"kdf"`
 	Iterations    int          `json:"iterations"`
+	Memory        int          `json:"memory,omitempty"`
+	Parallelism   int          `json:"parallelism,omitempty"`
 	Snapshot      syncResponse `json:"snapshot"`
 }
 
@@ -27,12 +29,12 @@ func (c *Client) Matches(cache *Cache) bool {
 
 func (s *Session) Cache(snapshot *Snapshot) *Cache {
 	return &Cache{Version: 1, Server: s.client.server, Email: s.client.email, DeviceID: s.client.deviceID,
-		OAuthClientID: s.oauthClientID, SSOIdentifier: s.ssoIdentifier, Iterations: s.iterations, Snapshot: snapshot.response}
+		OAuthClientID: s.oauthClientID, SSOIdentifier: s.ssoIdentifier, KDF: s.kdf.Type, Iterations: s.kdf.Iterations, Memory: s.kdf.Memory, Parallelism: s.kdf.Parallelism, Snapshot: snapshot.response}
 }
 
 // Unlock validates cached identity and readable contents without accessing the server or credential store.
 func Unlock(ctx context.Context, cache *Cache, password []byte) (*Session, *Snapshot, error) {
-	if cache == nil || cache.Version != 1 || cache.KDF != 0 || cache.Email == "" {
+	if cache == nil || cache.Version != 1 || cache.Email == "" {
 		return nil, nil, ErrUnsupported
 	}
 	if cache.OAuthClientID != "" && cache.OAuthClientID != "cli" {
@@ -51,7 +53,8 @@ func Unlock(ctx context.Context, cache *Cache, password []byte) (*Session, *Snap
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
 	}
-	stretched, _, err := derive(cache.Email, password, cache.Iterations)
+	config := kdfConfig{cache.KDF, cache.Iterations, cache.Memory, cache.Parallelism}
+	stretched, _, err := derive(ctx, cache.Email, password, config)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -68,7 +71,7 @@ func Unlock(ctx context.Context, cache *Cache, password []byte) (*Session, *Snap
 		return nil, nil, err
 	}
 	session := &Session{client: client, key: memguard.NewBufferFromBytes(key),
-		oauthClientID: cache.OAuthClientID, ssoIdentifier: cache.SSOIdentifier, protectedKey: cache.Snapshot.Profile.Key, iterations: cache.Iterations}
+		oauthClientID: cache.OAuthClientID, ssoIdentifier: cache.SSOIdentifier, protectedKey: cache.Snapshot.Profile.Key, kdf: config}
 	snapshot, _, err := session.validateSnapshot(ctx, cache.Snapshot)
 	if err != nil {
 		session.Close()

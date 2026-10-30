@@ -131,14 +131,14 @@ func (c *Client) ExchangeSSO(ctx context.Context, code SSOCode) (*Session, error
 		response.UserDecryptionOptions.HasMasterPassword != nil && !*response.UserDecryptionOptions.HasMasterPassword {
 		return nil, errors.New("SSO login requires a master password; Key Connector and passwordless Trusted Device accounts are unsupported")
 	}
-	if response.KDF == nil || *response.KDF != 0 {
-		return nil, fmt.Errorf("SSO login requires PBKDF2: %w", ErrUnsupported)
+	if response.KDF == nil {
+		return nil, fmt.Errorf("SSO response is missing Kdf: %w", ErrUnsupported)
 	}
 	if response.Key == "" {
 		return nil, fmt.Errorf("SSO response is missing the master-password-protected vault key; complete account setup in the web vault: %w", ErrUnsupported)
 	}
-	if response.Iterations < 100000 || response.Iterations > 2000000 {
-		return nil, errors.New("PBKDF2 iterations must be between 100000 and 2000000")
+	if err := response.kdfConfig().validate(); err != nil {
+		return nil, err
 	}
 	var profile struct{ ID, Email string }
 	if err := c.request(ctx, "GET", c.api+"/accounts/profile", nil, false, response.Access, &profile); err != nil {
@@ -153,7 +153,7 @@ func (c *Client) ExchangeSSO(ctx context.Context, code SSOCode) (*Session, error
 	}
 	resolved := *c
 	resolved.email = email
-	return &Session{client: &resolved, accountID: profile.ID, protectedKey: response.Key, iterations: response.Iterations,
+	return &Session{client: &resolved, accountID: profile.ID, protectedKey: response.Key, kdf: response.kdfConfig(),
 		oauthClientID: "cli", ssoIdentifier: code.Identifier, access: memguard.NewBufferFromBytes([]byte(response.Access)),
 		refresh: memguard.NewBufferFromBytes([]byte(response.Refresh))}, nil
 }
@@ -170,7 +170,7 @@ func (s *Session) UnlockSSO(ctx context.Context, password []byte) (*Session, err
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	stretched, _, err := derive(s.client.email, password, s.iterations)
+	stretched, _, err := derive(ctx, s.client.email, password, s.kdf)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +178,7 @@ func (s *Session) UnlockSSO(ctx context.Context, password []byte) (*Session, err
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	session, err := s.client.openSession(stretched, s.iterations, tokens{Key: s.protectedKey, Access: string(s.access.Bytes()), Refresh: string(s.refresh.Bytes())})
+	session, err := s.client.openSession(stretched, s.kdf, tokens{Key: s.protectedKey, Access: string(s.access.Bytes()), Refresh: string(s.refresh.Bytes())})
 	if err != nil {
 		return nil, err
 	}

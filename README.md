@@ -49,12 +49,12 @@ flowchart LR
 ## Compatibility
 
 macOS / Linux; native credential store required. Password, personal API Key, and
-browser SSO login with master-password-protected PBKDF2 accounts. Tested against Vaultwarden snapshots; official
+browser SSO login with master-password-protected PBKDF2 and Argon2id accounts. Tested against Vaultwarden snapshots; official
 Bitwarden server interoperability remains unverified.
 
 SSO uses the organization's existing Bitwarden identity-provider integration, including Okta.
 Live Okta SSO interoperability remains unverified.
-Not yet supported: Argon2id, additional Bitwarden two-step login, Key Connector, or passwordless Trusted Device encryption.
+Not yet supported: additional Bitwarden two-step login, Key Connector, or passwordless Trusted Device encryption.
 Unofficial client; not affiliated with Bitwarden.
 
 ## Development

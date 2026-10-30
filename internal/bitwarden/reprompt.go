@@ -19,7 +19,7 @@ func (s *Session) VerifyPassword(ctx context.Context, password []byte) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	stretched, _, err := derive(s.client.email, password, s.iterations)
+	stretched, _, err := derive(ctx, s.client.email, password, s.kdf)
 	if err != nil {
 		return err
 	}

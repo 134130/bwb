@@ -1,6 +1,7 @@
 package bitwarden
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -146,7 +147,35 @@ func testSSOCode() SSOCode {
 }
 
 func TestSSOLoginRefreshAndOfflineUnlock(t *testing.T) {
+	t.Run("PBKDF2", func(t *testing.T) { testSSOLoginRefreshAndOfflineUnlock(t, false) })
+	t.Run("Argon2id", func(t *testing.T) { testSSOLoginRefreshAndOfflineUnlock(t, true) })
+}
+
+func testSSOLoginRefreshAndOfflineUnlock(t *testing.T, argon bool) {
 	_, email, password, token, snapshot := apiKeyFixture(t)
+	if argon {
+		old, _, err := derive(t.Context(), email, []byte(password), token.kdfConfig())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer clear(old)
+		key, err := decrypt(token.Key, old)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer clear(key)
+		kind := 1
+		token.KDF, token.Iterations, token.Memory, token.Parallelism = &kind, 3, 64, 4
+		stretched, _, err := derive(t.Context(), email, []byte(password), token.kdfConfig())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer clear(stretched)
+		padded := append(bytes.Clone(key), bytes.Repeat([]byte{16}, 16)...)
+		defer clear(padded)
+		token.Key = encryptPadded(t, padded, stretched)
+		snapshot.Profile.Key = token.Key
+	}
 	token.Refresh = "sso-refresh"
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -188,7 +217,9 @@ func TestSSOLoginRefreshAndOfflineUnlock(t *testing.T) {
 	}))
 	defer server.Close()
 	client, _ := NewClient(server.URL, "", testDevice)
-	session, err := client.LoginSSO(t.Context(), []byte(password), testSSOCode())
+	code := testSSOCode()
+	code.Identifier = "work"
+	session, err := client.LoginSSO(t.Context(), []byte(password), code)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,8 +232,8 @@ func TestSSOLoginRefreshAndOfflineUnlock(t *testing.T) {
 		t.Fatal(err)
 	}
 	cache := session.Cache(got)
-	if cache.OAuthClientID != "cli" {
-		t.Fatal("SSO client missing from cache")
+	if cache.OAuthClientID != "cli" || cache.SSOIdentifier != "work" || cache.KDF != *token.KDF || cache.Memory != token.Memory || cache.Parallelism != token.Parallelism {
+		t.Fatal("SSO/KDF metadata missing from cache")
 	}
 	key, access, refresh := session.key, session.access, session.refresh
 	session.Close()
@@ -215,6 +246,12 @@ func TestSSOLoginRefreshAndOfflineUnlock(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer restored.Close()
+	if restored.ssoIdentifier != "work" {
+		t.Fatal("lost SSO identifier")
+	}
+	if err := restored.VerifyPassword(t.Context(), []byte(password)); err != nil {
+		t.Fatal(err)
+	}
 	if requests.Load() != before || restored.HasCredentials() {
 		t.Fatal("unlock accessed network credentials")
 	}
@@ -242,8 +279,8 @@ func TestSSORejectsInvalidAccountAndResponse(t *testing.T) {
 	}{
 		{"missing access", "incomplete", func(m map[string]any) { delete(m, "access_token") }},
 		{"missing refresh", "incomplete", func(m map[string]any) { delete(m, "refresh_token") }},
-		{"missing KDF", "PBKDF2", func(m map[string]any) { delete(m, "Kdf") }},
-		{"argon2", "PBKDF2", func(m map[string]any) { m["Kdf"] = 1 }},
+		{"missing KDF", "missing Kdf", func(m map[string]any) { delete(m, "Kdf") }},
+		{"invalid argon2", "Argon2id requires", func(m map[string]any) { m["Kdf"] = 1 }},
 		{"excessive KDF", "iterations", func(m map[string]any) { m["KdfIterations"] = 2000001 }},
 		{"missing key", "protected vault key", func(m map[string]any) { delete(m, "Key") }},
 		{"bad key", "decrypt protected vault key", func(m map[string]any) { m["Key"] = "2.invalid" }},

@@ -101,7 +101,7 @@ type Session struct {
 	oauthClientID           string
 	ssoIdentifier           string
 	protectedKey, accountID string
-	iterations              int
+	kdf                     kdfConfig
 }
 
 func (s *Session) Close() {
@@ -123,11 +123,17 @@ type tokens struct {
 	Key                   string `json:"Key"`
 	KDF                   *int   `json:"Kdf"`
 	Iterations            int    `json:"KdfIterations"`
+	Memory                int    `json:"KdfMemory"`
+	Parallelism           int    `json:"KdfParallelism"`
 	APIUseKeyConnector    bool   `json:"ApiUseKeyConnector"`
 	KeyConnectorURL       string `json:"KeyConnectorUrl"`
 	UserDecryptionOptions *struct {
 		HasMasterPassword *bool `json:"HasMasterPassword"`
 	} `json:"UserDecryptionOptions"`
+}
+
+func (t tokens) kdfConfig() kdfConfig {
+	return kdfConfig{*t.KDF, t.Iterations, t.Memory, t.Parallelism}
 }
 
 func (c *Client) Login(ctx context.Context, password []byte) (*Session, error) {
@@ -138,17 +144,20 @@ func (c *Client) Login(ctx context.Context, password []byte) (*Session, error) {
 		return nil, errors.New("invalid password length")
 	}
 	var kdf struct {
-		Type       *int `json:"kdf"`
-		Iterations int  `json:"kdfIterations"`
+		Type        *int `json:"kdf"`
+		Iterations  int  `json:"kdfIterations"`
+		Memory      int  `json:"kdfMemory"`
+		Parallelism int  `json:"kdfParallelism"`
 	}
 	data, _ := json.Marshal(map[string]string{"email": c.email})
 	if err := c.request(ctx, "POST", c.identity+"/accounts/prelogin", data, false, "", &kdf); err != nil {
 		return nil, err
 	}
-	if kdf.Type == nil || *kdf.Type != 0 {
+	if kdf.Type == nil {
 		return nil, ErrUnsupported
 	}
-	stretched, hash, err := derive(c.email, password, kdf.Iterations)
+	config := kdfConfig{*kdf.Type, kdf.Iterations, kdf.Memory, kdf.Parallelism}
+	stretched, hash, err := derive(ctx, c.email, password, config)
 	if err != nil {
 		return nil, err
 	}
@@ -169,10 +178,10 @@ func (c *Client) Login(ctx context.Context, password []byte) (*Session, error) {
 	if response.Access == "" || response.Refresh == "" || response.Key == "" {
 		return nil, errors.New("incomplete login response")
 	}
-	return c.openSession(stretched, kdf.Iterations, response)
+	return c.openSession(stretched, config, response)
 }
 
-func (c *Client) openSession(stretched []byte, iterations int, response tokens) (*Session, error) {
+func (c *Client) openSession(stretched []byte, config kdfConfig, response tokens) (*Session, error) {
 	key, err := decrypt(response.Key, stretched)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt protected vault key: %w", err)
@@ -183,7 +192,7 @@ func (c *Client) openSession(stretched []byte, iterations int, response tokens) 
 	}
 	defer clear(key)
 	session := &Session{client: c, key: memguard.NewBufferFromBytes(key),
-		access: memguard.NewBufferFromBytes([]byte(response.Access)), protectedKey: response.Key, iterations: iterations}
+		access: memguard.NewBufferFromBytes([]byte(response.Access)), protectedKey: response.Key, kdf: config}
 	if response.Refresh != "" {
 		session.refresh = memguard.NewBufferFromBytes([]byte(response.Refresh))
 	}
