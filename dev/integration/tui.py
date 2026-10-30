@@ -161,7 +161,7 @@ def main():
                 send('\r')
                 pause()
                 for _ in range(20):
-                    if any('>' in line[:40] and name in line[:40] for line in screen.display):
+                    if any('>' in line[:48] and name in line[:48] for line in screen.display):
                         break
                     send('\x1b[B')
                     pause()
@@ -172,7 +172,7 @@ def main():
 
             def select_field(name):
                 for _ in range(20):
-                    if any('> ' + name in line[41:] for line in screen.display):
+                    if any('> ' + name in line[49:] for line in screen.display):
                         return
                     send('\x1b[B')
                     pause()
@@ -184,7 +184,7 @@ def main():
                 send('\r')
                 pause()
                 for _ in range(20):
-                    if any('>' in line[:40] and 'Protected login' in line[:40] for line in screen.display):
+                    if any('>' in line[:48] and 'Protected login' in line[:48] for line in screen.display):
                         break
                     send('\x1b[B'); pause()
                 until(lambda: 'Enter to verify' in view())
@@ -232,7 +232,7 @@ def main():
             select_field('Password')
             for rgb, active, inactive in [('ffff/ffff/ffff', '252a31', 'cbd0d6'), ('1717/1919/1d1d', 'dce0e5', '424953')]:
                 send('\x1b]11;rgb:' + rgb + '\x1b\\')
-                until(lambda: screen.buffer[6][41].fg == active and screen.buffer[6][0].fg == inactive)
+                until(lambda: screen.buffer[4][49].fg == active and screen.buffer[4][0].fg == inactive)
             assert secret not in view()
             clipboard_file = Path(os.environ['BWB_CLIPBOARD_FILE'])
             clipboard_file.write_text('')
@@ -258,8 +258,8 @@ def main():
             until(lambda: secret not in view())
             pause()
             until(lambda: 'Working' not in view() and 'Secrets hidden' in view())
-            assert 'GitHub' in screen.display[3]
-            until(lambda: any('>' in line[:40] and 'GitHub (demo)' in line[:40] for line in screen.display))
+            assert 'GitHub' in screen.display[2]
+            until(lambda: any('>' in line[:48] and 'GitHub (demo)' in line[:48] for line in screen.display))
             send('v')
             until(lambda: secret in view())
             subprocess.run([binary, 'daemon', 'stop'], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=12)

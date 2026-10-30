@@ -267,14 +267,14 @@ func (t *Tree) View(size Size) string {
 				icon = "▸ "
 			}
 		}
-		label := strings.Repeat("  ", row.Depth) + icon + highlight(t.Query, row.Node.Name, t.Light)
+		label := strings.Repeat(" ", row.Depth) + icon + highlight(t.Query, row.Node.Name, t.Light)
 		if row.Node.Item != nil {
 			label += "  " + subdued(safe(row.Node.Item.Type), t.Light)
 		}
 		if i == t.Index {
-			label = selection("> "+label, size.Width, t.Light)
+			label = selection(">"+label, size.Width, t.Light)
 		} else {
-			label = "  " + label
+			label = " " + label
 		}
 		lines = append(lines, label)
 	}

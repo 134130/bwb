@@ -22,14 +22,14 @@ func newExplorer() ExplorerPage {
 	return ExplorerPage{Search: input, Focus: "tree"}
 }
 func (e *ExplorerPage) layout(size Size) (Size, Size) {
-	h := max(0, size.Height-4)
+	h := max(0, size.Height-3)
 	if size.Width < 85 {
 		if e.Focus == "detail" {
 			return Size{}, Size{max(0, size.Width), h}
 		}
 		return Size{max(0, size.Width), h}, Size{}
 	}
-	left := max(28, size.Width/3)
+	left := max(28, size.Width*40/100)
 	return Size{left, h}, Size{max(0, size.Width-left-1), h}
 }
 func (e *ExplorerPage) Update(msg tea.Msg, size Size) tea.Cmd {
@@ -122,7 +122,7 @@ func (e *ExplorerPage) View(size Size) string {
 		parts = append(parts, panel("Item", e.Detail.View(inside(right)), right, e.Focus == "detail", e.Light))
 	}
 	search := panel("Search", e.Search.View(Size{max(0, size.Width-4), 1}), Size{size.Width, 3}, e.Focus == "search", e.Light)
-	return box(search+"\n\n"+lipgloss.JoinHorizontal(lipgloss.Top, parts...), size)
+	return box(search+"\n"+lipgloss.JoinHorizontal(lipgloss.Top, parts...), size)
 }
 func (e *ExplorerPage) hints() string {
 	switch e.Focus {

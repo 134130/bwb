@@ -103,7 +103,7 @@ func tick() tea.Cmd {
 func (r *Root) Init() tea.Cmd {
 	return tea.Batch(r.load(), tick(), r.watchConnection(), tea.RequestBackgroundColor)
 }
-func (r *Root) contentSize() Size { return Size{max(0, r.size.Width), max(0, r.size.Height-4)} }
+func (r *Root) contentSize() Size { return Size{max(0, r.size.Width), max(0, r.size.Height-3)} }
 func (r *Root) operation(kind string, call func(context.Context) (any, error)) tea.Cmd {
 	if r.cancel != nil {
 		r.cancel()
@@ -804,7 +804,7 @@ func (r *Root) View() tea.View {
 		body = dialog(title, content, body, size, r.light)
 		hints = "Enter submit · Esc cancel"
 	}
-	view := tea.NewView(box(title+"\n\n"+box(body, size)+"\n"+subdued(safe(status), r.light)+"\n"+safe(hints), r.size))
+	view := tea.NewView(box(title+"\n"+box(body, size)+"\n"+subdued(safe(status), r.light)+"\n"+safe(hints), r.size))
 	view.AltScreen = true
 	return view
 }
