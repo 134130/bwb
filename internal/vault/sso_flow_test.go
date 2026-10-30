@@ -280,7 +280,7 @@ func TestSSOPlanDistinguishesUnavailableDiscovery(t *testing.T) {
 	}
 }
 
-func TestSSORejectsConfigIdentityChangeDuringBrowserLogin(t *testing.T) {
+func TestSSOAllowsPolicyChangeDuringBrowserLogin(t *testing.T) {
 	f := newSSOFlow(t)
 	s := f.service
 	plan, err := s.PlanLogin(t.Context(), f.plan)
@@ -295,15 +295,15 @@ func TestSSORejectsConfigIdentityChangeDuringBrowserLogin(t *testing.T) {
 		t.Fatal(err)
 	}
 	pending := s.profiles["default"].auth.pending
-	if err := s.ApplyConfig(t.Context(), &config.File{Profiles: map[string]config.Profile{"default": {Email: "different@example.invalid"}}}); err != nil {
+	if err := s.ApplyConfig(t.Context(), &config.File{Profiles: map[string]config.Profile{"default": {LockTimeout: "15m"}}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.FinishSSO(t.Context(), UnlockRequest{Profile: "default", AuthID: reservation.ID, Password: []byte(f.password)}); err == nil {
-		t.Fatal("login ignored changed configured identity")
+	if _, err := s.FinishSSO(t.Context(), UnlockRequest{Profile: "default", AuthID: reservation.ID, Password: []byte(f.password)}); err != nil {
+		t.Fatal("policy change prevented login", err)
 	}
 	saved, err := s.load(t.Context(), "default")
-	if err != nil || saved.Cache != nil || len(f.secrets.values) != 0 || pending.HasCredentials() {
-		t.Fatal("failed login retained credentials", err)
+	if err != nil || saved.Cache == nil || saved.Cache.Email != f.plan.Email || len(f.secrets.values) == 0 || pending.HasCredentials() {
+		t.Fatal("login did not persist identity", err)
 	}
 }
 

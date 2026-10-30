@@ -72,7 +72,7 @@ SQLite와 keychain은 분산 트랜잭션이 아니므로 credential 참조와 �
 
 새 바이너리를 빌드한 뒤 `.dev/bwb daemon update`로 daemonkit이 선택한 실행 파일을 갱신한다. 다른 내용의 바이너리면 daemon이 재시작되어 unlock이 필요하다. 동일 바이너리는 no-op이다. config 파일과 profile별 idle timeout을 지원한다.
 
-대화형 `login/unlock`은 `--password-stdin` 없이도 비밀번호를 입력받는다. `item read/item totp/list/sync`의 자동 인증은 stdin이 TTY이고 `--non-interactive`가 아닐 때만 실행한다. stdout이 pipe여도 prompt는 controlling terminal에 표시하므로 출력 데이터와 섞이지 않는다. 비TTY 실행은 입력을 소비하지 않고 인증 필요 오류를 반환한다. 최초 로그인 정보가 없는 profile은 `login`에서 서버 URL과 이메일을 입력한다. 명시적 `--server`/`--email`이나 저장된 값이 있으면 묻지 않는다. 주소와 이메일은 보이는 입력이며 잘못된 값은 다시 입력받는다. 비TTY/`--non-interactive`에서는 빠진 필드를 명시하도록 안내하며 stdin의 비밀번호를 소비하지 않는다. 서버는 로그인에 성공한 profile에만 저장하고 config에서는 지정하지 않는다.
+대화형 `login/unlock`은 `--password-stdin` 없이도 비밀번호를 입력받는다. `item read/item totp/list/sync`의 자동 인증은 stdin이 TTY이고 `--non-interactive`가 아닐 때만 실행한다. stdout이 pipe여도 prompt는 controlling terminal에 표시하므로 출력 데이터와 섞이지 않는다. 비TTY 실행은 입력을 소비하지 않고 인증 필요 오류를 반환한다. 최초 로그인 정보가 없는 profile은 `login`에서 서버 URL과 이메일을 입력한다. 명시적 `--server`/`--email`이나 저장된 값이 있으면 묻지 않는다. 주소와 이메일은 보이는 입력이며 잘못된 값은 다시 입력받는다. 비TTY/`--non-interactive`에서는 빠진 필드를 명시하도록 안내하며 stdin의 비밀번호를 소비하지 않는다. 서버와 이메일은 로그인에 성공한 profile에만 저장하고 config에서는 지정하지 않는다.
 
 자동 인증은 profile당 prompt 소유자 하나를 예약하고 다른 CLI는 결과를 기다린다. 소유자의 취소·연결 종료·lock/logout은 예약을 폐기하며 대기자에게 새 prompt를 연쇄 생성하지 않는다. 응답 직후 연결 감시를 시작하기 전 이탈 같은 경우를 위해 미사용 예약은 2분 뒤 만료된다. 비밀번호는 daemon 예약에 보관하지 않는다. 암호화 실패·네트워크·keychain 장애는 자동 로그인으로 바꾸지 않는다. 잠금과 서버 로그인 만료가 겹치면 1회 복구 한도 때문에 명시적 login이 필요할 수 있다.
 
@@ -84,7 +84,7 @@ SQLite와 keychain은 분산 트랜잭션이 아니므로 credential 참조와 �
 bwb login --apikey --profile work --server SERVER_URL
 ```
 
-`client_id`, `client_secret`, 마스터 비밀번호를 숨김 입력으로 받는다. `--email`은 선택 사항이다. 최초 로그인에서 이메일을 생략하면 API Key 인증 후 서버 프로필에서 조회하고 계정 ID를 검증한다. config 또는 기존 로그인에 이메일이 있으면 그 값을 사용하며, 명시한 이메일도 실제 계정과 일치해야 한다. 저장된 로그인에 서버가 있으면 `--server`를 생략할 수 있다. 최초 대화형 로그인에서는 빠진 서버 URL을 입력받는다. 기존 login처럼 첫 sync와 unlock까지 성공해야 로그인을 저장한다. API Key는 서버 인증에 사용하고, 마스터 비밀번호는 로컬 복호화에만 사용한다. 개인 키(`user.<account UUID>`)만 지원하며 조직 API Key와 Secrets Manager 토큰은 받지 않는다.
+`client_id`, `client_secret`, 마스터 비밀번호를 숨김 입력으로 받는다. `--email`은 선택 사항이다. 최초 로그인에서 이메일을 생략하면 API Key 인증 후 서버 프로필에서 조회하고 계정 ID를 검증한다. 기존 로그인에 이메일이 있으면 그 값을 사용하며, 명시한 이메일도 실제 계정과 일치해야 한다. 저장된 로그인에 서버가 있으면 `--server`를 생략할 수 있다. 최초 대화형 로그인에서는 빠진 서버 URL을 입력받는다. 기존 login처럼 첫 sync와 unlock까지 성공해야 로그인을 저장한다. API Key는 서버 인증에 사용하고, 마스터 비밀번호는 로컬 복호화에만 사용한다. 개인 키(`user.<account UUID>`)만 지원하며 조직 API Key와 Secrets Manager 토큰은 받지 않는다.
 
 자동화에서는 `BWB_CLIENTID`와 `BWB_CLIENTSECRET`을 안전하게 환경변수로 공급하고 다음 명령을 실행한다. `--password-stdin`에는 마스터 비밀번호만 전달한다.
 
@@ -114,7 +114,7 @@ bwb login --profile work
 
 Vaultwarden의 고정 더미 identifier는 SSO 활성 여부를 뜻하지 않으므로 `/identity/sso/prevalidate`로 추가 확인한다. 비활성 응답은 비밀번호 로그인으로 진행하고, 검증 중 장애는 오류로 반환한다. ([Vaultwarden 구현](https://github.com/dani-garcia/vaultwarden/blob/1.37.4/src/api/identity.rs))
 
-`--server`는 Okta 주소가 아닌 Bitwarden 웹 금고 주소다. 터미널에서 Bitwarden 마스터 비밀번호를 먼저 입력한 뒤, 브라우저에서 Bitwarden 조직에 설정된 SSO를 통해 Okta 로그인과 조직의 MFA를 완료한다. Okta 비밀번호와 client secret은 bwb가 받지 않는다. `--identifier`는 Bitwarden 관리 콘솔의 Single sign-on에 설정한 SSO 식별자이며 생략하면 브라우저에서 입력한다. `--sso`에서는 `--email`도 선택 사항이며 인증 후 서버 프로필에서 확인한다. 서버는 저장된 로그인에서, 이메일은 config 또는 저장된 로그인에서 가져온다. 최초 대화형 로그인에서 서버가 없으면 입력받고, 다른 계정으로 인증하면 저장하지 않는다. 성공한 SSO profile에는 로그인 방식과 identifier도 저장해 다음 `login --profile work`에서 재사용한다.
+`--server`는 Okta 주소가 아닌 Bitwarden 웹 금고 주소다. 터미널에서 Bitwarden 마스터 비밀번호를 먼저 입력한 뒤, 브라우저에서 Bitwarden 조직에 설정된 SSO를 통해 Okta 로그인과 조직의 MFA를 완료한다. Okta 비밀번호와 client secret은 bwb가 받지 않는다. `--identifier`는 Bitwarden 관리 콘솔의 Single sign-on에 설정한 SSO 식별자이며 생략하면 브라우저에서 입력한다. `--sso`에서는 `--email`도 선택 사항이며 인증 후 서버 프로필에서 확인한다. 서버와 이메일은 저장된 로그인에서 가져온다. 최초 대화형 로그인에서 서버가 없으면 입력받고, 다른 계정으로 인증하면 저장하지 않는다. 성공한 SSO profile에는 로그인 방식과 identifier도 저장해 다음 `login --profile work`에서 재사용한다.
 
 [공식 CLI의 브라우저 SSO 흐름](https://github.com/bitwarden/clients/blob/main/apps/cli/src/auth/commands/login.command.ts)에 맞춰 Authorization Code + PKCE를 사용한다. 콜백은 로컬 8065–8070 포트 중 사용 가능한 하나에서 받고, state와 중복 응답을 검증한다. 마스터 비밀번호 입력을 마친 뒤 브라우저를 열고, 콜백을 받으면 코드를 토큰으로 교환한 다음 미리 받은 비밀번호로 금고를 연다. 브라우저 대기 중 비밀번호는 CLI의 잠긴 메모리에만 보관하며, 사용·실패·취소 후 파기한다. 잘못된 비밀번호는 브라우저 인증을 반복하지 않고 재입력할 수 있으며, `--password-stdin`은 한 번만 읽는다. profile당 인증 소유자 하나만 브라우저를 열고 다른 CLI는 결과를 기다린다. 브라우저·토큰 교환·비밀번호 입력을 포함한 예약은 5분 뒤 만료되며, 취소·연결 종료·lock/logout·daemon 종료 때 대기 토큰을 파기하고 늦은 콜백/입력을 거부한다.
 
@@ -155,22 +155,22 @@ integration은 실제 Vaultwarden에서 Go API 코드와 빌드된 CLI·daemon�
 
 첫 목록 요청에서 이름·소속 metadata만 복호화해 profile 메모리에 index를 만든다. 원문 비밀 필드는 index에 넣지 않으며 후속 목록은 index를 재사용한다. 이름 자체는 민감할 수 있고 Go 메모리 index의 즉시 zeroize는 보장하지 않는다. 성공한 login/unlock/sync와 lock/logout/shutdown에서 index 참조를 폐기한다. RPC는 최대 128행·JSON 48 KiB씩 전달하며 cursor는 profile/query/index generation에 묶인다. 한 행이 한도를 넘으면 명시적으로 실패한다. CLI는 전 페이지를 받은 뒤 출력하며 도중 snapshot 변경은 부분 출력 없이 재실행을 요구한다. 자동 인증은 목록 전체를 최대 한 번 재시도한다.
 
-Config는 `${XDG_CONFIG_HOME:-$HOME/.config}/bwb/config.toml`에서 읽는다(macOS도 동일). `--config > BWB_CONFIG > 기본 경로`로 한 파일만 선택하며 병합하지 않는다. 기본 파일이 없으면 기존 명령을 그대로 사용하고, 명시한 파일이 없으면 실패한다. TOML schema는 [예제](../dev/config.example.toml)를 따른다. Version 1, 존재하는 default_profile, `[a-z][a-z0-9_-]{0,31}` profile 이름, 이메일·비음수 lock_timeout을 검증한다. `server` 필드는 제거되었으므로 기존 파일에서 삭제하고 최초 `login`에서 입력하거나 `--server`로 전달한다. 생략된 timeout은 0s이며 알 수 없는 키(비밀번호/token 포함)는 거부한다. 파일을 만들거나 수정하는 명령은 아직 없다.
+Config는 `${XDG_CONFIG_HOME:-$HOME/.config}/bwb/config.toml`에서 읽는다(macOS도 동일). `--config > BWB_CONFIG > 기본 경로`로 한 파일만 선택하며 병합하지 않는다. 기본 파일이 없으면 기존 명령을 그대로 사용하고, 명시한 파일이 없으면 실패한다. TOML schema는 [예제](../dev/config.example.toml)를 따른다. Version 1, 존재하는 default_profile, `[a-z][a-z0-9_-]{0,31}` profile 이름, 비음수 lock_timeout을 검증한다. `server`와 `email`은 config 필드가 아니므로 기존 파일에서 삭제하고 최초 `login`에서 입력하거나 `--server`/`--email`로 전달한다. 생략된 timeout은 0s이며 알 수 없는 키(비밀번호/token 포함)는 거부한다. 파일을 만들거나 수정하는 명령은 아직 없다.
 
 ```sh
 bwb config path
 bwb config validate
 bwb profile list
 bwb profile show personal
-bwb --profile personal login                 # 최초 서버 입력, 이후 저장된 서버 사용
+bwb --profile personal login                 # 최초 서버·이메일 입력, 이후 저장된 값 사용
 bwb --config ./test.toml item list
 ```
 
-Profile 선택은 `--profile > BWB_PROFILE > default_profile > default`다. 명시적 profile이나 BWB_PROFILE이 있으면 일반 명령은 TOML을 읽지 않는다. 기본 profile 결정과 `config/profile` 검사 명령만 파일을 읽는다. `profile list/show`는 디스크의 설정을 보여주며 실행 중 daemon 설정을 의미하지 않는다. Login의 생략된 서버는 저장된 인증 profile에서, 이메일은 daemon에 적용된 config 또는 저장된 profile에서 가져온다. 최초 대화형 로그인에서 없는 값만 입력받으며, 명시한 값이 저장된 identity와 다르면 거부한다. 잘못된 TOML에서도 `--profile NAME lock/logout/status`와 daemon stop은 실행 가능하다.
+Profile 선택은 `--profile > BWB_PROFILE > default_profile > default`다. 명시적 profile이나 BWB_PROFILE이 있으면 일반 명령은 TOML을 읽지 않는다. 기본 profile 결정과 `config/profile` 검사 명령만 파일을 읽는다. `profile list/show`는 디스크의 설정을 보여주며 실행 중 daemon 설정을 의미하지 않는다. Login의 생략된 서버는 저장된 인증 profile에서, 이메일은 저장된 인증 profile에서 가져온다. 최초 대화형 로그인에서 없는 값만 입력받으며, 명시한 값이 저장된 identity와 다르면 거부한다. 잘못된 TOML에서도 `--profile NAME lock/logout/status`와 daemon stop은 실행 가능하다.
 
-Daemon은 시작할 때 설정 경로를 확정하고 email/lock_timeout을 읽는다. 자동 시작 시 `--config` 또는 BWB_CONFIG의 경로를 전달한다. 이미 실행 중인 daemon의 파일 경로는 이후 CLI의 `--config`로 변경되지 않는다. 다른 경로를 쓰려면 daemon을 종료하고 새 경로로 시작한다. 재시작에도 같은 경로를 사용하려면 BWB_CONFIG를 설정하거나 `--config`를 다시 전달한다. `daemon run --config ...`는 foreground 실행 경로를 지정한다.
+Daemon은 시작할 때 설정 경로를 확정하고 lock_timeout/insecure_skip_reprompt 정책을 읽는다. 자동 시작 시 `--config` 또는 BWB_CONFIG의 경로를 전달한다. 이미 실행 중인 daemon의 파일 경로는 이후 CLI의 `--config`로 변경되지 않는다. 다른 경로를 쓰려면 daemon을 종료하고 새 경로로 시작한다. 재시작에도 같은 경로를 사용하려면 BWB_CONFIG를 설정하거나 `--config`를 다시 전달한다. `daemon run --config ...`는 foreground 실행 경로를 지정한다.
 
-직접 파일을 수정한 뒤 `bwb config validate`, `bwb daemon reload`를 실행한다. Reload는 daemon 시작 시 선택한 파일 전체를 검증하고 성공할 때만 정책을 교체한다. 문법 오류·누락 파일·로그인된 profile의 identity 변경이나 삭제는 기존 정책을 유지한 채 거부한다. Identity 변경/삭제는 먼저 해당 profile을 logout한다. Logout은 인증 상태만 지우며 TOML 정의는 유지한다. Watcher는 없고 일반 조회는 정책을 적용하지 않는다. 정책은 DB에 저장하지 않으며, 이전 개발 버전의 DB policy 필드는 무시한다(인증 캐시는 유지).
+직접 파일을 수정한 뒤 `bwb config validate`, `bwb daemon reload`를 실행한다. `daemon update`도 재시작 전에 선택한 설정을 검증한다. 설정 오류에는 파일 경로와 수정 안내를 표시하며, TOML 문법·타입 오류와 알 수 없는 키에는 행·열 위치를 표시한다. Reload는 daemon 시작 시 선택한 파일 전체를 검증하고 성공할 때만 정책을 교체한다. 문법 오류·누락 파일·로그인된 profile의 삭제는 기존 정책을 유지한 채 거부한다. 계정 변경과 로그인된 profile 삭제는 먼저 해당 profile을 logout한다. Logout은 인증 상태만 지우며 TOML 정의는 유지한다. Watcher는 없고 일반 조회는 정책을 적용하지 않는다. 정책은 DB에 저장하지 않으며, 이전 개발 버전의 DB policy 필드는 무시한다(인증 캐시는 유지).
 
 `lock_timeout = "0s"`는 자동 잠금을 끈다. 양수면 login/unlock 완료부터 계산하고 성공한 read/list에서 갱신한다. Status·sync·reload·실패한 조회는 연장하지 않는다. Reload로 시간이 줄어 이미 만료됐다면 잠금 처리하고 요청 진입에서도 deadline을 검사한다. 만료 시 진행 작업 취소, 키·목록 index 파기를 수행하며 cache/keychain 로그인은 유지한다. 다음 대화형 read/list는 기존 자동 unlock 후 재개한다. Native keychain 호출은 진행 중 취소할 수 없어 실제 파기 완료가 늦어질 수 있다.
 

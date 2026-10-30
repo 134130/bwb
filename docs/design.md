@@ -134,9 +134,9 @@ bwb daemon stop
 - profile = 서버 + 계정 + 해당 인증/cache. folder/collection이나 dev/prod override 집합이 아니다. profile 상속/합성과 프로젝트 config 자동 탐색은 없다.
 - config 경로는 `${XDG_CONFIG_HOME:-$HOME/.config}/bwb/config.toml`. `--config > BWB_CONFIG > 기본 경로` 순서로 한 파일만 읽는다.
 - 이름은 `[a-z][a-z0-9_-]{0,31}`. 알 수 없는 config 키·schema version·잘못된 duration은 거부한다.
-- config는 version/default_profile와 profile별 email/lock_timeout/insecure_skip_reprompt를 가진다. 서버 주소는 최초 로그인에서 입력하고 성공한 인증 profile에만 저장한다. token/password/키는 금지한다.
+- config는 version/default_profile와 profile별 lock_timeout/insecure_skip_reprompt를 가진다. 서버 주소와 이메일은 최초 로그인에서 입력하고 성공한 인증 profile에만 저장한다. token/password/키는 금지한다.
 - `lock_timeout = "0s"`는 명시적 lock 또는 daemon 종료까지 복호화 키를 유지한다. 양수는 login/unlock 완료부터 시작하고 성공한 read/list에서 갱신한다. status와 sync는 연장하지 않는다. 후속 TUI의 자동 polling은 사용자 조회와 구분해야 한다.
-- 한 OS 사용자당 daemonkit instance 하나. profile별 storage/secrets namespace를 사용하고 검증된 server URL/account ID를 저장된 identity와 대조한다. config 파일을 바꾸어 같은 이름을 다른 identity에 연결하면 충돌 오류다.
+- 한 OS 사용자당 daemonkit instance 하나. profile별 storage/secrets namespace를 사용하고 검증된 server URL/account ID를 저장된 identity와 대조한다. config는 계정 identity를 지정하지 않으며, 로그인 시 다른 계정으로 바꾸려면 먼저 logout한다.
 - server/email이 바뀐 profile은 기존 세션/cache를 재사용하지 않는다. 먼저 기존 identity로 logout하거나 새 profile을 만든다. profile use는 기본 선택만 바꾸며 다른 profile의 상태를 바꾸지 않는다.
 - cloud US/EU는 검증된 API/Identity 주소로 매핑한다. self-hosted는 base URL의 `/api`, `/identity`를 사용한다. 분리 custom endpoint는 후속이다.
 - HTTPS 필수, localhost/loopback 개발 서버만 HTTP 허용. URL userinfo/query/fragment를 거부하고 다른 origin으로 인증정보를 redirect하지 않는다.

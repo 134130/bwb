@@ -67,9 +67,9 @@ func (s *Service) applyConfig(ctx context.Context, file *config.File) error {
 			return errors.New("logout incomplete; retry logout")
 		}
 		if saved.Cache != nil {
-			policy, ok := next[name]
-			if !ok || saved.Cache.Email != policy.Email {
-				return errors.New("configured identity differs or profile removed; logout before reload")
+			_, ok := next[name]
+			if !ok {
+				return errors.New("configured profile removed; logout before reload")
 			}
 		}
 	}

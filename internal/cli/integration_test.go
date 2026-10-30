@@ -7,7 +7,6 @@ import (
 	"context"
 	"debug/buildinfo"
 	"encoding/json"
-	"fmt"
 	"github.com/134130/bwb/internal/vaultapi"
 	kit "github.com/134130/go-daemonkit"
 	"github.com/google/uuid"
@@ -435,7 +434,7 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 			args = []string{"tui"}
 		}
 		script := exec.CommandContext(ctx, "../../.dev/venv/bin/python", append([]string{"../../dev/integration/tui.py", binary, scenario}, args...)...)
-		script.Env = append(os.Environ(), "XDG_STATE_HOME="+state, "BWB_INSTANCE="+instance, "BWB_TEST_PASSWORD="+manifest.Password, "BWB_TEST_SERVER="+endpoint.URL)
+		script.Env = append(os.Environ(), "XDG_STATE_HOME="+state, "BWB_INSTANCE="+instance, "BWB_TEST_PASSWORD="+manifest.Password, "BWB_TEST_SERVER="+endpoint.URL, "BWB_TEST_EMAIL="+manifest.Email)
 		if output, err := script.CombinedOutput(); err != nil {
 			t.Fatalf("TUI %s: %v: %s", scenario, err, output)
 		}
@@ -577,12 +576,12 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 	// Daemon loads config at startup; edits take effect only through reload.
 	must("", "", "daemon", "stop")
 	configPath := filepath.Join(t.TempDir(), "config.toml")
-	configText := fmt.Sprintf("version = 1\ndefault_profile = \"timed\"\n[profiles.timed]\nemail = %q\nlock_timeout = \"1s\"\n[profiles.steady]\nemail = %q\nlock_timeout = \"0s\"\n", manifest.Email, manifest.Email)
+	configText := "version = 1\ndefault_profile = \"timed\"\n[profiles.timed]\nlock_timeout = \"1s\"\n[profiles.steady]\nlock_timeout = \"0s\"\n"
 	if err := os.WriteFile(configPath, []byte(configText), 0600); err != nil {
 		t.Fatal(err)
 	}
 	must("", "config valid\n", "--config", configPath, "config", "validate")
-	must(manifest.Password+"\n", "", "--config", configPath, "login", "--server", endpoint.URL, "--password-stdin")
+	must(manifest.Password+"\n", "", "--config", configPath, "login", "--server", endpoint.URL, "--email", manifest.Email, "--password-stdin")
 	must("", "STATE\tready\nVERSION\t"+version+"\nCONFIG\t"+configPath+"\n", "daemon", "status")
 	verbose, err := run("", "--profile", "timed", "status", "--verbose")
 	if err != nil || !strings.Contains(verbose, "SERVER\t"+endpoint.URL+"\n") || !strings.Contains(verbose, "EMAIL\t"+manifest.Email+"\n") || !strings.Contains(verbose, "LOCK_TIMEOUT\t1s\n") || strings.Contains(verbose, "LOCK_AT\t-\n") {
@@ -639,11 +638,11 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 		t.Fatal("config/idle recovery contacted server")
 	}
 	// Changing config cannot rebind existing credentials.
-	changed := strings.Replace(configText, manifest.Email, "wrong@example.invalid", 1)
+	changed := configText + "email = 'wrong@example.invalid'\n"
 	if err := os.WriteFile(configPath, []byte(changed), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if output, err := run("", "daemon", "reload"); err == nil || !strings.Contains(output, "identity differs") {
+	if output, err := run("", "daemon", "reload"); err == nil || !strings.Contains(output, "email is no longer a config field") {
 		t.Fatal("configured identity mismatch was not blocked", err, output)
 	}
 	if err := os.WriteFile(configPath, []byte(configText), 0600); err != nil {
@@ -688,12 +687,12 @@ func TestDaemonAgainstSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	restrictedConfig := configText + fmt.Sprintf("\n[profiles.restricted]\nemail = %q\ninsecure_skip_reprompt = true\n", manifest.Organizations.RestrictedEmail)
+	restrictedConfig := configText + "\n[profiles.restricted]\ninsecure_skip_reprompt = true\n"
 	if err := os.WriteFile(configPath, []byte(restrictedConfig), 0600); err != nil {
 		t.Fatal(err)
 	}
 	must("", "", "daemon", "reload")
-	must(manifest.Password+"\n", "", "--profile", "restricted", "login", "--server", endpoint.URL, "--password-stdin")
+	must(manifest.Password+"\n", "", "--profile", "restricted", "login", "--server", endpoint.URL, "--email", manifest.Organizations.RestrictedEmail, "--password-stdin")
 	if output, err := run("", "--profile", "restricted", "item", "read", manifest.Organizations.Entries[0].Items[1].ID, "--field", "password"); err == nil || !strings.Contains(output, "organization policy") {
 		t.Fatal("skip bypassed organization permissions", err, output)
 	}

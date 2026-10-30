@@ -10,11 +10,9 @@ import (
 const sample = `version = 1
 default_profile = "personal"
 [profiles.personal]
-email = "USER@example.com"
 lock_timeout = "15m"
 insecure_skip_reprompt = true
 [profiles.work]
-email = "work@example.com"
 `
 
 func TestConfigValidationAndSelection(t *testing.T) {
@@ -26,7 +24,7 @@ func TestConfigValidationAndSelection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if file.Profiles["personal"].Email != "user@example.com" || file.Profiles["personal"].LockTimeout != "15m0s" || file.Profiles["work"].LockTimeout != "0s" {
+	if file.Profiles["personal"].LockTimeout != "15m0s" || file.Profiles["work"].LockTimeout != "0s" {
 		t.Fatal("config normalization failed")
 	}
 	if !file.Profiles["personal"].InsecureSkipReprompt || file.Profiles["work"].InsecureSkipReprompt {
@@ -50,10 +48,9 @@ func TestConfigValidationAndSelection(t *testing.T) {
 		t.Fatal("legacy profile rejected", err)
 	}
 	for _, bad := range []string{
+		sample + "email = 'DO-NOT-ECHO@example.invalid'\n",
 		sample + "server = 'https://removed.example.invalid'\n",
 		strings.Replace(sample, "insecure_skip_reprompt = true", `insecure_skip_reprompt = "true"`, 1),
-		strings.Replace(sample, `email = "USER@example.com"`, `email = ""`, 1),
-		strings.Replace(sample, `email = "USER@example.com"`, `email = " "`, 1),
 		strings.Replace(sample, "version = 1", "version = 2", 1),
 		strings.Replace(sample, `"15m"`, `"-1s"`, 1),
 		strings.Replace(sample, `"15m"`, `"tomorrow"`, 1),

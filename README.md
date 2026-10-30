@@ -31,7 +31,7 @@ If discovery is unavailable, use `bwb login --sso --server https://vault.example
 The identifier and email can also be entered in the browser. After a successful login,
 `bwb login --profile work` reuses that profile's server, email, and SSO identifier.
 
-The server URL is set at login and saved with the profile; it is not a config field.
+The server URL and email are set at login and saved with the profile; neither is a config field.
 Profile settings live in `~/.config/bwb/config.toml` (`XDG_CONFIG_HOME` supported).
 Select with `--profile NAME`. Apply edits with `bwb daemon reload`.
 [Example config](dev/config.example.toml) · [Command and behavior reference](docs/reference.md)

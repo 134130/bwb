@@ -95,7 +95,7 @@ func (s *Service) BeginAuth(ctx context.Context, req AuthRequest) (AuthResponse,
 			done()
 			return AuthResponse{}, err
 		}
-		policy, configured := s.policies[req.Profile]
+		_, configured := s.policies[req.Profile]
 		if req.Action != "sso" && saved.Cache == nil && (!configured || req.Action != "login") {
 			err := s.authRequired(waitCtx, p, req.Profile, "login")
 			done()
@@ -164,7 +164,7 @@ func (s *Service) BeginAuth(ctx context.Context, req AuthRequest) (AuthResponse,
 				s.finishAuth(p)
 			}
 		})
-		result := AuthResponse{ID: attempt.id, Email: policy.Email}
+		result := AuthResponse{ID: attempt.id}
 		if saved.Cache != nil {
 			result.Server, result.Email = saved.Cache.Server, saved.Cache.Email
 		}

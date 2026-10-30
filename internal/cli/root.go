@@ -193,15 +193,7 @@ func NewRoot() *cobra.Command {
 			return manager.Stop(cmd.Context())
 		}})
 	control.AddCommand(&cobra.Command{Use: "update", Short: "Select this executable as the daemon release (restarts a running daemon)", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		manager, err := daemon.Manager()
-		if err != nil {
-			return err
-		}
-		executable, err := os.Executable()
-		if err != nil {
-			return err
-		}
-		return manager.Update(cmd.Context(), executable)
+		return daemon.Update(cmd.Context(), configPath)
 	}})
 	for _, kind := range []string{"item", "folder", "organization", "collection"} {
 		root.AddCommand(listCommand(kind, &profile, &nonInteractive))

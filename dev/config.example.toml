@@ -1,16 +1,14 @@
 # Apply edits with `bwb daemon reload`; failure keeps the running policy.
 # Copy to ~/.config/bwb/config.toml or select with --config. Contains no secrets.
-# Set the server URL at first login: bwb login --profile local --server http://localhost:8222
+# Set the server URL at first login: bwb login --profile local --server http://localhost:8222 --email bwb-demo@example.invalid
 version = 1
 default_profile = "local"
 
 [profiles.local]
-email = "bwb-demo@example.invalid"
 # Zero means retain unlocked vault keys until explicit lock or daemon exit.
 lock_timeout = "0s"
 # Skip item password reconfirmation only; never bypass unlock or organization permissions.
 insecure_skip_reprompt = false
 
 [profiles.work]
-email = "developer@example.invalid"
 lock_timeout = "15m"

@@ -59,7 +59,7 @@ TUI를 종료해도 환경은 유지된다. Go daemon 코드를 수정했다면 
 - Reprompt 항목의 CLI/TUI 재확인, 잘못된 비밀번호·취소, 항목별 권한과 sync 폐기, `insecure_skip_reprompt`의 profile 격리·명시적 reload.
 - 실제 PTY에서 stdout pipe와 prompt 분리, echo 비활성/복원, 잘못된·긴 비밀번호, Ctrl-C/SIGINT, lock, 동시 CLI의 단일 prompt·취소 전파.
 - refresh 거부 후 자동 재로그인·sync 1회 재시도, 인증 만료 중 cached read 유지, 비대화형·네트워크 장애는 prompt하지 않음.
-- Config의 이메일·정책과 로그인 시 입력하는 서버·identity 변경 차단, profile별 자동 잠금과 0s 비활성화, 재시작 후 TOML timeout 재적용, 명시적 reload 전후 정책 분리·잘못된 reload의 기존 정책 유지·잘못된 TOML 중 lock/logout, 만료 후 TTY 자동 unlock을 실제 CLI로 검증한다. 시간·조회 연장·정책 단축·취소·shutdown 경합은 synctest로 검사한다.
+- Config의 정책과 로그인 시 입력하는 서버·이메일의 identity 변경 차단, profile별 자동 잠금과 0s 비활성화, 재시작 후 TOML timeout 재적용, 명시적 reload 전후 정책 분리·잘못된 reload의 기존 정책 유지·잘못된 TOML 중 lock/logout, 만료 후 TTY 자동 unlock을 실제 CLI로 검증한다. 시간·조회 연장·정책 단축·취소·shutdown 경합은 synctest로 검사한다.
 - 입력 제한, API redirect 차단·응답 크기·KDF 비용 상한, synctest 기반 작업 취소와 shutdown 검증.
 
 Python runner는 복원된 서버의 URL을 테스트 자식 프로세스에 전달하고 `go test -tags=integration -count=1`을 실행한다. integration 태그 없이 `go test ./...`를 실행하면 Docker 없는 단위 검사만 실행한다. integration 태그가 있는데 서버 URL이 없으면 skip하지 않고 실패한다.

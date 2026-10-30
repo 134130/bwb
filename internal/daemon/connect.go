@@ -136,3 +136,26 @@ func upgradeConfigPath(status vaultapi.DaemonStatusResponse) (string, error) {
 	}
 	return status.ConfigPath, nil
 }
+
+// Update validates the launch config before stopping the selected daemon.
+func Update(ctx context.Context, configPath string) error {
+	path, explicit, err := config.Path(configPath)
+	if err != nil {
+		return err
+	}
+	if _, err := config.Load(path, explicit); err != nil {
+		return err
+	}
+	if explicit {
+		configPath = path
+	}
+	manager, err := launchManager(configPath)
+	if err != nil {
+		return err
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	return manager.Update(ctx, executable)
+}

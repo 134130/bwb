@@ -80,7 +80,7 @@ func (e Executor) authenticate(ctx context.Context, profile string, failure erro
 	if reservation.Ready {
 		return nil
 	}
-	if reservation.ID == "" || reservation.Email == "" || action != "login" && reservation.Server == "" {
+	if reservation.ID == "" || action != "login" && (reservation.Email == "" || reservation.Server == "") {
 		return errors.New("invalid authentication reservation")
 	}
 	end := vaultapi.AuthEndRequest{Profile: profile, ID: reservation.ID}
@@ -92,6 +92,20 @@ func (e Executor) authenticate(ctx context.Context, profile string, failure erro
 				return err
 			}
 			reservation.Server = strings.TrimSpace(string(server))
+			if _, err := bitwarden.NewClient(reservation.Server, reservation.Email, uuid.NewString()); err != nil {
+				return err
+			}
+		}
+		if reservation.Email == "" {
+			email, err := e.Prompt(authCtx, AuthPrompt{Action: action, Profile: profile, Server: reservation.Server, Label: "Email", Public: true})
+			defer clear(email)
+			if err != nil {
+				return err
+			}
+			reservation.Email = strings.TrimSpace(string(email))
+			if reservation.Email == "" {
+				return errors.New("email is required for first login")
+			}
 			if _, err := bitwarden.NewClient(reservation.Server, reservation.Email, uuid.NewString()); err != nil {
 				return err
 			}

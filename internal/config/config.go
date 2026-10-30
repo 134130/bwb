@@ -6,11 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/mail"
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
 	"time"
 
 	"github.com/pelletier/go-toml/v2"
@@ -18,7 +16,6 @@ import (
 
 type Profile struct {
 	InsecureSkipReprompt bool   `toml:"insecure_skip_reprompt" json:"insecureSkipReprompt"`
-	Email                string `toml:"email" json:"email"`
 	LockTimeout          string `toml:"lock_timeout" json:"lockTimeout"`
 }
 
@@ -31,14 +28,6 @@ type File struct {
 var profileName = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
 
 func Normalize(p Profile) (Profile, error) {
-	if strings.TrimSpace(p.Email) == "" {
-		return Profile{}, errors.New("profile email is required")
-	}
-	p.Email = strings.ToLower(strings.TrimSpace(p.Email))
-	address, err := mail.ParseAddress(p.Email)
-	if err != nil || address.Address != p.Email {
-		return Profile{}, errors.New("invalid profile email")
-	}
 	if p.LockTimeout == "" {
 		p.LockTimeout = "0s"
 	}
@@ -84,7 +73,12 @@ func DefaultPath() (string, error) {
 	return filepath.Join(base, "bwb", "config.toml"), nil
 }
 
-func Load(path string, explicit bool) (*File, error) {
+func Load(path string, explicit bool) (fileConfig *File, loadErr error) {
+	defer func() {
+		if loadErr != nil {
+			loadErr = fmt.Errorf("config %s: %w", path, loadErr)
+		}
+	}()
 	file, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) && !explicit {
 		return nil, nil
@@ -106,16 +100,26 @@ func Load(path string, explicit bool) (*File, error) {
 		if errors.As(err, &strict) {
 			for _, field := range strict.Errors {
 				key := field.Key()
-				if len(key) == 3 && key[0] == "profiles" && key[2] == "server" {
-					return nil, errors.New("server is no longer a config field; remove profiles.<name>.server and enter it at login or use --server")
+				if len(key) == 3 && key[0] == "profiles" && (key[2] == "server" || key[2] == "email") {
+					return nil, fmt.Errorf("%s is no longer a config field; remove profiles.<name>.%s and enter it at login or use --%s", key[2], key[2], key[2])
 				}
 			}
+			row, column := strict.Errors[0].Position()
+			return nil, fmt.Errorf("unknown config key at line %d, column %d; see dev/config.example.toml for supported settings", row, column)
+		}
+		var decode *toml.DecodeError
+		if errors.As(err, &decode) {
+			row, column := decode.Position()
+			return nil, fmt.Errorf("invalid TOML syntax or value type at line %d, column %d", row, column)
 		}
 		// Parser excerpts can contain accidentally supplied passwords or tokens.
 		return nil, errors.New("invalid config: malformed TOML, unknown key, or invalid value type")
 	}
+	if config.Version == 0 {
+		return nil, errors.New("config version is required; add version = 1 at the top of the file")
+	}
 	if config.Version != 1 {
-		return nil, errors.New("unsupported config version")
+		return nil, errors.New("unsupported config version; supported version is 1")
 	}
 	for name, p := range config.Profiles {
 		if !profileName.MatchString(name) {

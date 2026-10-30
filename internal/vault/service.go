@@ -199,12 +199,6 @@ func (s *Service) login(ctx context.Context, req LoginRequest, apiKey *bitwarden
 }
 
 func (s *Service) loginClient(req LoginRequest, saved *record, discoverEmail bool) (*bitwarden.Client, error) {
-	policy, configured := s.policies[req.Profile]
-	if configured {
-		if req.Email == "" {
-			req.Email = policy.Email
-		}
-	}
 	if req.Server == "" && saved.Cache != nil {
 		req.Server = saved.Cache.Server
 	}
@@ -217,10 +211,6 @@ func (s *Service) loginClient(req LoginRequest, saved *record, discoverEmail boo
 	client, err := bitwarden.NewClient(req.Server, req.Email, uuid.NewString())
 	if err != nil {
 		return nil, err
-	}
-	_, email := client.Identity()
-	if configured && email != policy.Email {
-		return nil, errors.New("login identity differs from configured profile")
 	}
 	if saved.Cache != nil {
 		if !client.Matches(saved.Cache) {
@@ -469,7 +459,7 @@ func (s *Service) Status(ctx context.Context, req ProfileRequest) (StatusRespons
 	}
 	result := StatusResponse{State: state, LockTimeout: "0s"}
 	if policy, ok := s.policies[req.Profile]; ok {
-		result.Email, result.LockTimeout = policy.Email, policy.LockTimeout
+		result.LockTimeout = policy.LockTimeout
 		result.InsecureSkipReprompt = policy.InsecureSkipReprompt
 	}
 	if saved.Cache != nil {
